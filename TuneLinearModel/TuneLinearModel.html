@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<!-- saved from url=(0131)file:///Users/dan/Documents/Codex/2026-08-14/referenced-chatgpt-conversation-this-is-untrusted/outputs/linear-regression-tuner.html -->
+<html lang="en"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+  
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tune a Linear Model</title>
+  <style>
+    :root { --ink:#172033; --muted:#667085; --line:#d9deea; --panel:#fff; --bg:#f4f6fb; --blue:#2563eb; --cyan:#0ea5e9; --red:#e84c5b; --shadow:0 12px 32px rgba(24,39,75,.08); }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.45 Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+    button,input { font:inherit; }
+    button { cursor:pointer; }
+    .app { max-width:1240px; margin:auto; padding:28px; }
+    header { display:flex; align-items:end; justify-content:space-between; gap:20px; margin-bottom:18px; }
+    h1,h2,p { margin:0; }
+    h1 { font-size:clamp(1.7rem,3vw,2.5rem); letter-spacing:-.04em; }
+    h2 { font-size:1.05rem; }
+    .subtitle,.hint { color:var(--muted); }
+    .layout { display:grid; grid-template-columns:230px minmax(0,1fr); gap:16px; }
+    .card { background:var(--panel); border:1px solid var(--line); border-radius:18px; box-shadow:var(--shadow); padding:18px; }
+    .data-card { grid-row:span 2; }
+    table { width:100%; border-collapse:separate; border-spacing:6px; margin:10px -6px; }
+    th { text-align:left; color:var(--muted); font-size:.78rem; text-transform:uppercase; letter-spacing:.08em; padding-left:8px; }
+    input[type=number] { width:100%; min-width:0; border:1px solid var(--line); border-radius:9px; padding:7px 8px; color:var(--ink); background:#fff; }
+    input[type=number]:focus,button:focus-visible,input[type=range]:focus-visible { outline:3px solid rgba(37,99,235,.22); outline-offset:2px; }
+    .controls { display:grid; grid-template-columns:1fr 1fr; gap:20px; }
+    .range-label { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
+    .range-label output { font-variant-numeric:tabular-nums; font-weight:750; color:var(--blue); }
+    input[type=range] { width:100%; accent-color:var(--blue); }
+    .status { display:grid; grid-template-columns:minmax(220px,1fr) auto; align-items:center; gap:20px; margin-top:20px; }
+    .model-box { background:#f6f8ff; border-radius:14px; padding:14px; }
+    .equation { font-size:1.45rem; font-weight:780; letter-spacing:-.03em; margin:2px 0; font-variant-numeric:tabular-nums; }
+    .error-box { display:flex; align-items:center; justify-content:center; min-width:205px; gap:16px; }
+    .orb-wrap { width:94px; height:94px; display:grid; place-items:center; }
+    .orb { width:var(--size,58px); height:var(--size,58px); border-radius:50%; background:rgba(232,76,91,.18); border:3px solid var(--red); transition:width .09s linear,height .09s linear; }
+    .error-number { font-size:1.7rem; font-weight:800; font-variant-numeric:tabular-nums; line-height:1; }
+    .actions { display:flex; flex-wrap:wrap; gap:9px; margin-top:16px; }
+    button { border:1px solid var(--line); color:var(--ink); background:#fff; border-radius:10px; padding:9px 12px; font-weight:650; }
+    button:hover { border-color:#aeb7ca; background:#f8faff; }
+    button.primary { background:var(--blue); color:#fff; border-color:var(--blue); }
+    button.primary:hover { background:#1d4ed8; }
+    .plots { display:grid; grid-template-columns:1fr; gap:16px; margin-top:16px; }
+    .plots.revealed { grid-template-columns:1fr 1fr; }
+    .plot-head { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:10px; }
+    canvas { width:100%; height:380px; display:block; border:1px solid var(--line); border-radius:13px; background:#fff; touch-action:none; }
+    .parameter { display:none; }
+    .plots.revealed .parameter { display:block; }
+    .callout { display:none; margin-top:16px; border-left:5px solid var(--blue); background:#eef4ff; border-radius:12px; padding:14px 16px; }
+    .callout.visible { display:block; }
+    .legend { display:flex; gap:14px; color:var(--muted); font-size:.82rem; }
+    .key::before { content:""; display:inline-block; width:10px; height:10px; margin-right:5px; border-radius:50%; background:var(--blue); }
+    .key.residual::before { border-radius:1px; background:var(--red); }
+    .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
+    @media(max-width:820px){ .app{padding:16px}.layout{grid-template-columns:1fr}.data-card{grid-row:auto}.plots.revealed{grid-template-columns:1fr}.status{grid-template-columns:1fr}.controls{grid-template-columns:1fr}canvas{height:330px} }
+  </style>
+</head>
+<body>
+<main class="app" id="app">
+  <header><div><h1>Tune a Linear Model</h1><p class="subtitle">Change two numbers. Watch one line become a better prediction.</p></div></header>
+  <div class="layout">
+    <section class="card data-card" aria-labelledby="data-title">
+      <h2 id="data-title">Toy data</h2><p class="hint">Edit any value.</p>
+      <table><thead><tr><th scope="col">X</th><th scope="col">Y</th></tr></thead><tbody id="rows"><tr><td><input type="number" step="0.1" value="1" data-i="0" data-k="x" aria-label="X value 1"></td><td><input type="number" step="0.1" value="2" data-i="0" data-k="y" aria-label="Y value 1"></td></tr><tr><td><input type="number" step="0.1" value="2" data-i="1" data-k="x" aria-label="X value 2"></td><td><input type="number" step="0.1" value="3.2" data-i="1" data-k="y" aria-label="Y value 2"></td></tr><tr><td><input type="number" step="0.1" value="3" data-i="2" data-k="x" aria-label="X value 3"></td><td><input type="number" step="0.1" value="3.7" data-i="2" data-k="y" aria-label="Y value 3"></td></tr><tr><td><input type="number" step="0.1" value="4" data-i="3" data-k="x" aria-label="X value 4"></td><td><input type="number" step="0.1" value="5.2" data-i="3" data-k="y" aria-label="Y value 4"></td></tr><tr><td><input type="number" step="0.1" value="5" data-i="4" data-k="x" aria-label="X value 5"></td><td><input type="number" step="0.1" value="5.8" data-i="4" data-k="y" aria-label="Y value 5"></td></tr></tbody></table>
+      <button id="reset">Reset data</button>
+    </section>
+    <section class="card">
+      <div class="controls">
+        <label><span class="range-label"><span>Slope <i>m</i></span><output id="mOut">0.96</output></span><input id="mSlider" type="range" step="0.01" min="-2.5" max="2.5"></label>
+        <label><span class="range-label"><span>Intercept <i>b</i></span><output id="bOut">1.10</output></span><input id="bSlider" type="range" step="0.01" min="-3.6999999999999993" max="11.5"></label>
+      </div>
+      <div class="status">
+        <div class="model-box"><span class="hint">Current model</span><div class="equation" id="equation">y = 0.96x + 1.10</div><span class="hint">The starting model predicts mean Y every time.</span></div>
+        <div class="error-box"><div class="orb-wrap"><div class="orb" id="orb" aria-hidden="true" style="--size: 14.207040508142432px;"></div></div><div><div class="hint">Error index</div><div class="error-number" id="errorOut" aria-live="polite">2.0</div><div class="hint">start = 100</div></div></div>
+      </div>
+      <div class="actions"><button id="mean">Return to mean-only model</button><button class="primary" id="reveal" aria-expanded="true">Hide parameter space</button></div>
+    </section>
+  </div>
+  <div class="plots revealed" id="plots">
+    <section class="card"><div class="plot-head"><div><h2>Data space</h2><p class="hint">Observed points, fitted line, and residuals</p></div><div class="legend"><span class="key">data</span><span class="key residual">residual</span></div></div><canvas id="dataPlot" role="img" aria-label="Scatterplot with fitted line and residuals" width="1092" height="760"></canvas></section>
+    <section class="card parameter" id="parameter"><div class="plot-head"><div><h2>Parameter space</h2><p class="hint">Lower error is lighter</p></div><button id="best">Show best fit</button></div><canvas id="heatmap" role="img" aria-label="Error heatmap for slope and intercept" width="1092" height="760"></canvas></section>
+  </div>
+  <div class="callout visible" id="callout"><strong>Every point on this map represents a different possible line on the data graph.</strong> Move the sliders, or click and drag on the map.</div>
+</main>
+<script>
+(() => {
+  'use strict';
+  const defaults=[{x:1,y:2},{x:2,y:3.2},{x:3,y:3.7},{x:4,y:5.2},{x:5,y:5.8}];
+  let data=defaults.map(d=>({...d})), m=0, b=0, baseline=1, revealed=false, dragging=false;
+  let range={m0:-3,m1:3,b0:-3,b1:9};
+  const $=id=>document.getElementById(id), rows=$('rows'), ms=$('mSlider'), bs=$('bSlider');
+  const meanY=()=>data.reduce((s,d)=>s+d.y,0)/data.length;
+  const sse=(mm,bb)=>data.reduce((s,d)=>s+(d.y-(mm*d.x+bb))**2,0);
+  const clamp=(v,a,z)=>Math.max(a,Math.min(z,v));
+  function setRanges(){
+    const xs=data.map(d=>d.x), ys=data.map(d=>d.y), dx=Math.max(1,Math.max(...xs)-Math.min(...xs)), dy=Math.max(1,Math.max(...ys)-Math.min(...ys));
+    const sl=Math.max(2.5,2.5*dy/dx), ylo=Math.min(...ys), yhi=Math.max(...ys);
+    range={m0:-sl,m1:sl,b0:ylo-1.5*dy,b1:yhi+1.5*dy};
+    ms.min=range.m0; ms.max=range.m1; bs.min=range.b0; bs.max=range.b1;
+    m=clamp(m,range.m0,range.m1); b=clamp(b,range.b0,range.b1);
+  }
+  function renderTable(){
+    rows.replaceChildren(...data.map((d,i)=>{ const tr=document.createElement('tr'); tr.innerHTML=`<td><input type="number" step="0.1" value="${d.x}" data-i="${i}" data-k="x" aria-label="X value ${i+1}"></td><td><input type="number" step="0.1" value="${d.y}" data-i="${i}" data-k="y" aria-label="Y value ${i+1}"></td>`; return tr; }));
+    rows.querySelectorAll('input').forEach(el=>el.addEventListener('change',e=>{ const v=Number(e.target.value); if(!Number.isFinite(v)){e.target.value=data[+e.target.dataset.i][e.target.dataset.k];return} data[+e.target.dataset.i][e.target.dataset.k]=v; setRanges(); baseline=Math.max(1e-9,sse(0,meanY())); update(); }));
+  }
+  function canvas2d(el){ const r=el.getBoundingClientRect(), d=devicePixelRatio||1, h=parseFloat(getComputedStyle(el).height); el.width=Math.round(r.width*d);el.height=Math.round(h*d);const c=el.getContext('2d');c.setTransform(d,0,0,d,0,0);return{c,w:r.width,h}; }
+  function dataPlot(){
+    const {c,w,h}=canvas2d($('dataPlot')), p={l:48,r:20,t:18,b:42}, xs=data.map(d=>d.x), ys=data.map(d=>d.y), xmin=Math.min(...xs), xmax=Math.max(...xs), xp=Math.max(.6,(xmax-xmin)*.12), xa=xmin-xp, xz=xmax+xp;
+    let ymin=Math.min(...ys,m*xa+b,m*xz+b), ymax=Math.max(...ys,m*xa+b,m*xz+b), yp=Math.max(.6,(ymax-ymin)*.16);ymin-=yp;ymax+=yp;
+    const X=x=>p.l+(x-xa)/(xz-xa)*(w-p.l-p.r), Y=y=>h-p.b-(y-ymin)/(ymax-ymin)*(h-p.t-p.b);
+    c.clearRect(0,0,w,h);c.font='12px system-ui';c.fillStyle='#667085';c.strokeStyle='#e3e7ef';c.lineWidth=1;
+    for(let i=0;i<=5;i++){const yy=ymin+(ymax-ymin)*i/5, py=Y(yy);c.beginPath();c.moveTo(p.l,py);c.lineTo(w-p.r,py);c.stroke();c.fillText(yy.toFixed(1),7,py+4)}
+    c.strokeStyle='#e84c5b';c.lineWidth=2;c.globalAlpha=.6;data.forEach(d=>{c.beginPath();c.moveTo(X(d.x),Y(d.y));c.lineTo(X(d.x),Y(m*d.x+b));c.stroke()});c.globalAlpha=1;
+    c.strokeStyle='#2563eb';c.lineWidth=3;c.beginPath();c.moveTo(X(xa),Y(m*xa+b));c.lineTo(X(xz),Y(m*xz+b));c.stroke();
+    c.fillStyle='#172033';data.forEach(d=>{c.beginPath();c.arc(X(d.x),Y(d.y),5.5,0,2*Math.PI);c.fill()});
+    c.fillStyle='#667085';c.textAlign='center';c.fillText('X',w/2,h-12);c.save();c.translate(15,h/2);c.rotate(-Math.PI/2);c.fillText('Y',0,0);c.restore();
+  }
+  function heatmap(){
+    if(!revealed)return;const {c,w,h}=canvas2d($('heatmap')),p={l:55,r:20,t:18,b:46},cols=64,rr=52,vals=[];
+    for(let j=0;j<rr;j++)for(let i=0;i<cols;i++)vals.push(sse(range.m0+(i+.5)/cols*(range.m1-range.m0),range.b1-(j+.5)/rr*(range.b1-range.b0)));
+    const sorted=[...vals].sort((a,z)=>a-z), lo=sorted[0], hi=sorted[Math.floor(sorted.length*.92)]||lo+1, cw=(w-p.l-p.r)/cols,ch=(h-p.t-p.b)/rr;c.clearRect(0,0,w,h);let k=0;
+    for(let j=0;j<rr;j++)for(let i=0;i<cols;i++){const q=Math.sqrt(clamp((vals[k++]-lo)/(hi-lo||1),0,1));c.fillStyle=`hsl(${215-205*q} ${78+8*q}% ${96-43*q}%)`;c.fillRect(p.l+i*cw,p.t+j*ch,cw+1,ch+1)}
+    c.strokeStyle='#aeb7ca';c.strokeRect(p.l,p.t,w-p.l-p.r,h-p.t-p.b);
+    const x=p.l+(m-range.m0)/(range.m1-range.m0)*(w-p.l-p.r),y=p.t+(range.b1-b)/(range.b1-range.b0)*(h-p.t-p.b);c.fillStyle='#fff';c.strokeStyle='#172033';c.lineWidth=3;c.beginPath();c.arc(x,y,8,0,2*Math.PI);c.fill();c.stroke();
+    c.fillStyle='#667085';c.font='12px system-ui';c.textAlign='center';c.fillText(range.m0.toFixed(1),p.l,h-23);c.fillText(range.m1.toFixed(1),w-p.r,h-23);c.fillText('slope m',w/2,h-9);c.textAlign='right';c.fillText(range.b1.toFixed(1),p.l-8,p.t+5);c.fillText(range.b0.toFixed(1),p.l-8,h-p.b+4);c.save();c.translate(15,h/2);c.rotate(-Math.PI/2);c.textAlign='center';c.fillText('intercept b',0,0);c.restore();
+  }
+  function update(){
+    ms.value=m;bs.value=b;$('mOut').value=m.toFixed(2);$('bOut').value=b.toFixed(2);$('equation').textContent=`y = ${m.toFixed(2)}x ${b<0?'−':'+'} ${Math.abs(b).toFixed(2)}`;
+    const index=100*sse(m,b)/baseline;$('errorOut').textContent=index<10?index.toFixed(1):Math.round(index).toLocaleString();
+    const areaRatio=clamp(index/100,0.06,2.4),diameter=58*Math.sqrt(areaRatio);$('orb').style.setProperty('--size',`${diameter}px`);dataPlot();heatmap();
+  }
+  function meanModel(){m=0;b=meanY();baseline=Math.max(1e-9,sse(m,b));update()}
+  function bestFit(){const mx=data.reduce((s,d)=>s+d.x,0)/data.length,my=meanY(),den=data.reduce((s,d)=>s+(d.x-mx)**2,0);m=den?data.reduce((s,d)=>s+(d.x-mx)*(d.y-my),0)/den:0;b=my-m*mx;setRanges();update()}
+  function pick(e){const el=$('heatmap'),r=el.getBoundingClientRect(),p={l:55,r:20,t:18,b:46},x=clamp(e.clientX-r.left,p.l,r.width-p.r),y=clamp(e.clientY-r.top,p.t,r.height-p.b);m=range.m0+(x-p.l)/(r.width-p.l-p.r)*(range.m1-range.m0);b=range.b1-(y-p.t)/(r.height-p.t-p.b)*(range.b1-range.b0);update()}
+  ms.addEventListener('input',()=>{m=+ms.value;update()});bs.addEventListener('input',()=>{b=+bs.value;update()});$('mean').addEventListener('click',meanModel);$('best').addEventListener('click',bestFit);
+  $('reset').addEventListener('click',()=>{data=defaults.map(d=>({...d}));renderTable();setRanges();meanModel()});
+  $('reveal').addEventListener('click',e=>{revealed=!revealed;$('plots').classList.toggle('revealed',revealed);$('callout').classList.toggle('visible',revealed);e.currentTarget.textContent=revealed?'Hide parameter space':'Reveal parameter space';e.currentTarget.setAttribute('aria-expanded',revealed);requestAnimationFrame(update)});
+  const hm=$('heatmap');hm.addEventListener('pointerdown',e=>{dragging=true;hm.setPointerCapture(e.pointerId);pick(e)});hm.addEventListener('pointermove',e=>{if(dragging)pick(e)});hm.addEventListener('pointerup',()=>dragging=false);hm.addEventListener('pointercancel',()=>dragging=false);
+  let resizeTimer;addEventListener('resize',()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(update,80)});
+  renderTable();setRanges();meanModel();
+})();
+</script>
+
+
+</body></html>
