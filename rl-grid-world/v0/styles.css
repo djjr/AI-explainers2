@@ -1,0 +1,38 @@
+:root {
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+body {
+  margin: 0;
+  background: #1a1a2e;
+  color: #eee;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 100vh;
+}
+
+header {
+  padding: 16px;
+  text-align: center;
+}
+
+header h1 {
+  margin: 0 0 6px;
+  font-size: 1.4rem;
+}
+
+.status {
+  font-size: 0.85rem;
+  color: #aaa;
+}
+
+main {
+  padding: 8px;
+}
+
+canvas {
+  border: 2px solid #333;
+  border-radius: 4px;
+  background: #16213e;
+}

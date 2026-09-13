@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>RL Grid World</title>
+  <link rel="stylesheet" href="styles.css"/>
+</head>
+<body>
+  <header>
+    <h1>RL Grid World</h1>
+    <div id="status" class="status">Use arrow keys or run the random agent</div>
+  </header>
+
+  <main>
+    <div class="panel">
+      <canvas id="grid" width="480" height="480"></canvas>
+
+      <div class="controls">
+        <div class="control-group">
+          <div class="label">Manual</div>
+          <div class="hint">Arrow keys to move, R to reset</div>
+        </div>
+
+        <div class="control-group">
+          <div class="label">Random Agent</div>
+          <button id="runOne">Run 1 Episode</button>
+          <button id="runBatch">Run 100 Episodes</button>
+          <button id="resetStats">Reset Stats</button>
+        </div>
+
+        <div class="control-group">
+          <div class="label">Speed</div>
+          <input id="speed" type="range" min="1" max="100" value="20"/>
+          <span id="speedLabel">20 steps/sec</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="stats-panel">
+      <h2>Episode Statistics</h2>
+      <table id="statsTable">
+        <tr><td>Episodes run</td><td id="statEpisodes">0</td></tr>
+        <tr><td>Avg steps</td><td id="statAvgSteps">—</td></tr>
+        <tr><td>Avg reward</td><td id="statAvgReward">—</td></tr>
+        <tr><td>Goal reached</td><td id="statGoals">0</td></tr>
+        <tr><td>Fell in pit</td><td id="statPits">0</td></tr>
+        <tr><td>Timed out</td><td id="statTimeouts">0</td></tr>
+        <tr><td>Success rate</td><td id="statSuccessRate">—</td></tr>
+      </table>
+    </div>
+  </main>
+
+  <script src="env.js"></script>
+  <script src="render.js"></script>
+  <script src="agent.js"></script>
+  <script src="main.js"></script>
+</body>
+</html>

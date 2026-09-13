@@ -1,0 +1,192 @@
+:root {
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+body {
+  margin: 0;
+  background: #1a1a2e;
+  color: #eee;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 100vh;
+}
+
+header {
+  padding: 16px;
+  text-align: center;
+}
+
+header h1 {
+  margin: 0 0 6px;
+  font-size: 1.4rem;
+}
+
+.status {
+  font-size: 0.85rem;
+  color: #aaa;
+}
+
+main {
+  padding: 8px;
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.side-panels {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+canvas {
+  border: 2px solid #333;
+  border-radius: 4px;
+  background: #16213e;
+}
+
+/* --- Controls --- */
+.controls {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.control-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.control-group .label {
+  font-size: 0.8rem;
+  color: #aaa;
+  min-width: 60px;
+}
+
+.control-group .hint {
+  font-size: 0.8rem;
+  color: #666;
+}
+
+select {
+  font: inherit;
+  padding: 4px 8px;
+  border: 1px solid #475569;
+  background: #334155;
+  color: #eee;
+  border-radius: 6px;
+  font-size: 0.85rem;
+}
+
+button {
+  font: inherit;
+  padding: 6px 12px;
+  border: 1px solid #475569;
+  background: #334155;
+  color: #eee;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+button:hover {
+  background: #475569;
+}
+
+button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+input[type="range"] {
+  width: 120px;
+}
+
+#speedLabel {
+  font-size: 0.8rem;
+  color: #aaa;
+  min-width: 80px;
+}
+
+.checkbox-label {
+  font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+/* --- Stats panel --- */
+.stats-panel {
+  background: #16213e;
+  border: 1px solid #333;
+  border-radius: 8px;
+  padding: 16px;
+  min-width: 220px;
+}
+
+.stats-panel h2 {
+  margin: 0 0 12px;
+  font-size: 1rem;
+  color: #aaa;
+}
+
+#statsTable {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+#statsTable td {
+  padding: 4px 0;
+  font-size: 0.85rem;
+}
+
+#statsTable td:first-child {
+  color: #aaa;
+}
+
+#statsTable td:last-child {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- Q-learning parameter panel --- */
+.param-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.param-row label {
+  font-size: 0.85rem;
+  color: #aaa;
+}
+
+.param-row input[type="number"] {
+  width: 70px;
+  padding: 4px 6px;
+  border: 1px solid #475569;
+  background: #334155;
+  color: #eee;
+  border-radius: 4px;
+  font: inherit;
+  font-size: 0.85rem;
+  text-align: right;
+}
+
+.param-hint {
+  font-size: 0.75rem;
+  color: #666;
+  margin-bottom: 10px;
+}
