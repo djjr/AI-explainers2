@@ -1,0 +1,882 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Watching a model learn, version 3: polynomial features and overfitting</title>
+<style>
+  /* ---------- Tokens (light default, dark via OS setting or data-theme) ---------- */
+  :root {
+    --bg: #ffffff; --panel: #f4f6f8; --fg: #16202a; --muted: #5b6773;
+    --grid: rgba(22, 32, 42, 0.09); --border: #d5dbe1;
+    --data: #1c5fd4;      /* training data */
+    --model: #c8321f;     /* the model / train loss */
+    --best: #1b7a3d;
+    --test: #a8620a;      /* test data / test loss */
+    --focus: #1c5fd4;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12171c; --panel: #1a2128; --fg: #e6ebf0; --muted: #94a1ae;
+      --grid: rgba(230, 235, 240, 0.10); --border: #303a44;
+      --data: #6ea2ff; --model: #ff7a63; --best: #5fd08a; --test: #f0b24a; --focus: #6ea2ff;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #12171c; --panel: #1a2128; --fg: #e6ebf0; --muted: #94a1ae;
+    --grid: rgba(230, 235, 240, 0.10); --border: #303a44;
+    --data: #6ea2ff; --model: #ff7a63; --best: #5fd08a; --test: #f0b24a; --focus: #6ea2ff;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); }
+  body {
+    font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    padding: 10px;
+    padding-top: calc(10px + env(safe-area-inset-top, 0px));
+    padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+  }
+
+  /* The app fills whatever frame it is given: controls left, plots right. */
+  #app {
+    display: grid; gap: 12px;
+    grid-template-columns: minmax(196px, 236px) minmax(0, 1fr);
+    height: 100%; min-height: 470px; max-width: 1280px; margin: 0 auto;
+  }
+  .side { display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow-y: auto; }
+  h1 { font-size: 1.05rem; font-weight: 650; margin: 0 0 2px; letter-spacing: -0.01em; }
+  .sub { margin: 0; color: var(--muted); font-size: 0.82rem; }
+
+  .stage {
+    display: grid; gap: 10px; min-height: 0; min-width: 0;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: repeat(2, minmax(0, 1fr));
+  }
+  figure { margin: 0; display: flex; flex-direction: column; min-height: 0; min-width: 0;
+           background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 7px 8px 6px; }
+  figcaption { display: flex; align-items: center; gap: 6px; font-size: 0.8rem; font-weight: 600; padding: 0 2px 4px; }
+  figcaption .cap { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  button.info { flex: none; width: 20px; height: 20px; padding: 0; border-radius: 50%; font-size: 0.72rem; font-weight: 700;
+                font-family: Georgia, "Times New Roman", serif; font-style: italic; line-height: 1; color: var(--muted); }
+  button.info:hover { color: var(--fg); }
+  figcaption small { font-weight: 400; color: var(--muted); margin-left: 4px; }
+  .cell { flex: 1; min-height: 0; min-width: 0; container-type: size; }
+  .box { position: relative; width: 100cqw; height: 100cqh; }
+  .box canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: pan-y pinch-zoom; }
+  #data { cursor: crosshair; touch-action: none; }   /* only this chart needs raw touches (dragging points) */
+  .stage figure { scroll-margin-top: 8px; }
+
+  .btns { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  button {
+    font: inherit; font-size: 0.85rem; color: var(--fg); background: var(--panel);
+    border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; cursor: pointer;
+  }
+  button:hover { border-color: var(--muted); }
+  button.primary { background: var(--fg); color: var(--bg); border-color: var(--fg); font-weight: 600; }
+  button.wide { width: 100%; }
+  button:focus-visible, input[type=range]:focus-visible, select:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  .slider { display: flex; flex-direction: column; gap: 2px; }
+  .slider label { font-size: 0.8rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .slider label b { color: var(--fg); font-weight: 650; }
+  .slider small { font-size: 0.75rem; color: var(--muted); }
+  .slider small.warn { color: var(--model); font-weight: 600; }
+  input[type=range] { width: 100%; margin: 2px 0; accent-color: var(--model); }
+  select { font: inherit; font-size: 0.82rem; width: 100%; color: var(--fg); background: var(--panel);
+           border: 1px solid var(--border); border-radius: 6px; padding: 5px 6px; }
+  .readout { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; align-content: start; margin: 0;
+             background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px;
+             font-variant-numeric: tabular-nums; font-size: 0.82rem; }
+  .readout dt { color: var(--muted); }
+  .readout dd { margin: 0; text-align: right; font-weight: 600; }
+  .readout .test { color: var(--test); }
+  #status { grid-column: 1 / -1; min-height: 1.3em; margin-top: 3px; font-size: 0.78rem; font-weight: 500; color: var(--model); }
+  .hint { margin: 0; color: var(--muted); font-size: 0.78rem; }
+
+  /* ---------- Pop-up slides ---------- */
+  /* Non-modal: the charts underneath stay live. Position is set from JS so the header can drag it. */
+  dialog#slide { position: fixed; inset: auto; left: 0; top: 0; margin: 0; z-index: 50;
+                 width: min(640px, calc(100vw - 24px)); max-height: calc(100vh - 24px); overflow: auto;
+                 padding: 6px 18px 12px; color: var(--fg); background: var(--bg);
+                 border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3); }
+  dialog#slide.collapsed { padding-bottom: 8px; width: min(360px, calc(100vw - 24px)); }
+  dialog#slide.collapsed #sl-title { font-size: 0.98rem; margin: 2px 0 0; }
+  dialog#slide.collapsed .sl-body { display: none; }
+  .sl-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; cursor: grab;
+             padding: 8px 0 2px; touch-action: none; user-select: none; -webkit-user-select: none; }
+  .sl-head.dragging { cursor: grabbing; }
+  .sl-head .grip { color: var(--muted); letter-spacing: 2px; font-size: 0.8rem; margin-right: 2px; }
+  .sl-btns { display: flex; gap: 6px; }
+  .sl-btns button { padding: 2px 9px; font-size: 0.95rem; line-height: 1.2; }
+  figure.spot { outline: 3px solid var(--model); outline-offset: 2px; }
+  #sl-kicker { font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+  #sl-title { margin: 4px 0 6px; font-size: 1.25rem; letter-spacing: -0.01em; }
+  #sl-idea { margin: 0 0 10px; font-size: 0.98rem; line-height: 1.45; padding-left: 10px; border-left: 3px solid var(--model); }
+  .sl-cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 22px; }
+  .sl-cols h3 { margin: 0 0 4px; font-size: 0.74rem; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
+  .sl-cols ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 5px; font-size: 0.86rem; line-height: 1.38; }
+  #sl-key li { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 6px; align-items: start; }
+  #sl-notice li { padding-left: 14px; position: relative; }
+  #sl-notice li::before { content: "›"; position: absolute; left: 3px; color: var(--model); font-weight: 700; }
+  .sw { display: inline-block; justify-self: center; margin-top: 4px; }
+  .sw.dot { width: 10px; height: 10px; border-radius: 50%; background: var(--c); }
+  .sw.dia { width: 9px; height: 9px; transform: rotate(45deg); border: 2px solid var(--c); background: var(--bg); }
+  .sw.line { width: 20px; height: 0; border-top: 3px solid var(--c); margin-top: 8px; }
+  .sw.dotted { width: 20px; height: 0; border-top: 3px dotted var(--c); margin-top: 8px; }
+  .sw.bar { width: 10px; height: 12px; background: var(--c); }
+  .sw.ring { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--c); margin-top: 3px; }
+  .sw.band { width: 14px; height: 12px; background: var(--c); opacity: 0.25; }
+  .sw.txt { font-size: 0.72rem; font-weight: 700; color: var(--muted); margin-top: 1px; }
+  #sl-try { margin: 10px 0 4px; padding: 7px 10px; border-radius: 8px; background: var(--panel); border: 1px solid var(--border); font-size: 0.86rem; }
+  #sl-try b { color: var(--test); }
+  #sl-live { margin: 4px 0 0; font-size: 0.8rem; color: var(--muted); font-variant-numeric: tabular-nums; min-height: 1.2em; }
+  .sl-foot { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+  .sl-dots { display: flex; gap: 6px; flex: 1; justify-content: center; }
+  .sl-dots i { width: 8px; height: 8px; border-radius: 50%; background: var(--border); }
+  .sl-dots i.on { background: var(--fg); }
+  @media (max-width: 600px) { .sl-cols { grid-template-columns: minmax(0, 1fr); } }
+  @media (max-height: 560px) { #sl-title { font-size: 1.1rem; } .sl-cols ul { font-size: 0.82rem; gap: 3px; } #sl-idea { font-size: 0.9rem; } }
+
+  /* Small screens: the slide becomes a bottom sheet. Tap or swipe its header to collapse and expand. */
+  @media (max-width: 600px) {
+    dialog#slide { left: 0 !important; top: auto !important; bottom: 0; width: 100% !important; max-width: none;
+                   max-height: 62vh; max-height: 62dvh; border-radius: 14px 14px 0 0; border-bottom: 0;
+                   padding: 0 16px calc(12px + env(safe-area-inset-bottom, 0px)); box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.28); }
+    dialog#slide.collapsed { padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px)); }
+    .sl-head { position: sticky; top: 0; z-index: 1; background: var(--bg); padding-top: 16px; cursor: pointer; }
+    .sl-head::before { content: ""; position: absolute; top: 6px; left: 50%; width: 38px; height: 4px; margin-left: -19px; border-radius: 2px; background: var(--border); }
+    html.sheet-open body { padding-bottom: calc(84px + env(safe-area-inset-bottom, 0px)); }          /* room to scroll past a collapsed sheet */
+    html.sheet-open.sheet-expanded body { padding-bottom: 66vh; padding-bottom: 66dvh; }            /* and an expanded one */
+  }
+
+  /* Short frames (a slide): drop the prose, keep the instrument. */
+  @media (max-height: 660px) { .side header, .side .hint { display: none; } }
+
+  /* Narrow frames (a phone): stack everything, plots first, and let the page scroll. */
+  @media (max-width: 520px) {
+    #app { grid-template-columns: minmax(0, 1fr); height: auto; }
+    .stage { order: -1; grid-template-columns: minmax(0, 1fr); grid-template-rows: none; }
+    .side { overflow: visible; }
+    .cell { container-type: normal; }
+    .box { width: 100%; height: auto; aspect-ratio: 4 / 3; }
+  }
+</style>
+</head>
+<body>
+<main id="app">
+  <aside class="side">
+    <header>
+      <h1>Watching a model learn <small style="font-weight:500;color:var(--muted)">v3</small></h1>
+      <p class="sub">Still one neuron with an identity activation. The curve comes from the inputs: x, x², x³, … Raise the degree and compare train with test.</p>
+    </header>
+
+    <div class="btns">
+      <button id="play" class="primary" type="button">Play</button>
+      <button id="step" type="button" title="Take one gradient step">Step</button>
+      <button id="restart" type="button" title="Set every weight back to zero and clear the history">Restart</button>
+      <button id="resetdata" type="button" title="Restore the original eight training points for the chosen true rule">Reset data</button>
+    </div>
+    <button id="fit" class="wide" type="button" title="Run gradient descent, fast, until the weights match the best possible fit for this degree">Fit to convergence</button>
+
+    <div class="slider">
+      <label for="deg">Degree <b id="deg-val">1</b> · <span id="npar">2</span> parameters</label>
+      <input id="deg" type="range" min="1" max="7" step="1" value="1">
+    </div>
+    <div class="slider">
+      <label for="lr">Learning rate η = <b id="lr-val">0.30</b></label>
+      <input id="lr" type="range" min="0" max="100" step="0.5" value="71">
+      <small id="lim"></small>
+    </div>
+    <div class="slider">
+      <label for="speed">Speed <b id="speed-val">20</b> iterations/sec</label>
+      <input id="speed" type="range" min="0" max="100" step="0.5" value="35">
+    </div>
+    <div class="slider">
+      <label for="truth">The true rule behind the data</label>
+      <select id="truth">
+        <option value="line">a line: y = 2x</option>
+        <option value="curve">a gentle curve: y = 0.6x + 0.2x²</option>
+        <option value="wave">a wave: y = 5 + 4·sin(0.9x)</option>
+      </select>
+    </div>
+
+    <dl class="readout" aria-live="off">
+      <dt>Iteration</dt><dd id="r-iter">0</dd>
+      <dt>Train loss</dt><dd id="r-train">0.000</dd>
+      <dt class="test">Test loss</dt><dd id="r-test" class="test">0.000</dd>
+      <div id="status" role="status" aria-live="polite"></div>
+    </dl>
+
+    <p class="hint">Start at degree 1 and press Play. Then raise the degree to 7 and press Fit to convergence. The top-right plot shows what each degree can do at best. Drag blue points to change the noise.</p>
+  </aside>
+
+  <section class="stage" aria-label="Plots">
+    <figure>
+      <figcaption><span class="cap">Data space <small>● train  ◇ test</small></span><button class="info" type="button" data-slide="0" aria-label="Explain the data space chart" title="Explain this chart">i</button></figcaption>
+      <div class="cell"><div class="box"><canvas id="data" aria-label="Training points, test points, the true rule and the fitted curve"></canvas></div></div>
+    </figure>
+    <figure>
+      <figcaption><span class="cap">Best fit at each degree <small>at its best</small></span><button class="info" type="button" data-slide="1" aria-label="Explain the best fit at each degree chart" title="Explain this chart">i</button></figcaption>
+      <div class="cell"><div class="box"><canvas id="deg-plot" aria-label="Train and test loss at the best fit for each polynomial degree"></canvas></div></div>
+    </figure>
+    <figure>
+      <figcaption><span class="cap">Loss during training <small>log scales</small></span><button class="info" type="button" data-slide="2" aria-label="Explain the loss during training chart" title="Explain this chart">i</button></figcaption>
+      <div class="cell"><div class="box"><canvas id="lossc" aria-label="Train and test loss against iteration"></canvas></div></div>
+    </figure>
+    <figure>
+      <figcaption><span class="cap">Weights <small id="wmax"></small></span><button class="info" type="button" data-slide="3" aria-label="Explain the weights chart" title="Explain this chart">i</button></figcaption>
+      <div class="cell"><div class="box"><canvas id="coef" aria-label="Current weight values"></canvas></div></div>
+    </figure>
+  </section>
+</main>
+
+<dialog id="slide" aria-labelledby="sl-title">
+  <div class="sl-head" id="sl-head" title="Drag to move this panel">
+    <span id="sl-kicker"></span>
+    <span class="sl-btns">
+      <button id="sl-min" type="button" aria-expanded="true" aria-label="Collapse to a title bar" title="Collapse / expand">▾</button>
+      <button id="sl-close" type="button" aria-label="Close explanation" title="Close (Esc)">×</button>
+    </span>
+  </div>
+  <h2 id="sl-title"></h2>
+  <div class="sl-body">
+    <p id="sl-idea"></p>
+    <div class="sl-cols">
+      <section><h3>What you're looking at</h3><ul id="sl-key"></ul></section>
+      <section><h3>What to notice</h3><ul id="sl-notice"></ul></section>
+    </div>
+    <p id="sl-try"></p>
+    <p id="sl-live" aria-live="off"></p>
+    <div class="sl-foot">
+      <button id="sl-prev" type="button">◀ Prev</button>
+      <span class="sl-dots" id="sl-dots" aria-hidden="true"></span>
+      <button id="sl-show" type="button" class="primary"></button>
+      <button id="sl-next" type="button">Next ▶</button>
+    </div>
+  </div>
+</dialog>
+
+<script>
+(() => {
+  'use strict';
+
+  /* ================= Data and the true rules ================= */
+  const X_TRAIN = [0.5, 1.3, 2.1, 2.9, 3.7, 4.5, 5.3, 6.0];
+  const NOISE   = [0.9, -1.1, 0.6, -0.5, 1.0, -0.9, 0.5, -0.7];       // fixed, so every session starts the same
+  const X_TEST  = Array.from({ length: 13 }, (_, i) => 0.25 + 0.5 * i);  // 0.25 .. 6.25
+  const TRUTH = {
+    line:  (x) => 2 * x,
+    curve: (x) => 0.6 * x + 0.2 * x * x,
+    wave:  (x) => 5 + 4 * Math.sin(0.9 * x),
+  };
+  const MAX_DEG = 7, MAX_ITERS = 3000000, RIDGE = 1e-10;
+  const TOL_REL = 1e-3;
+
+  /* Features: powers of a rescaled x. Rescaling is what makes gradient descent usable here. */
+  const T = (x) => (x - 3.25) / 2.75;
+  function feat(x, d) { const t = T(x), f = new Array(d + 1); let p = 1; for (let k = 0; k <= d; k++) { f[k] = p; p *= t; } return f; }
+
+  /* ================= Small linear algebra (matrices here are at most 8 x 8) ================= */
+  function solve(A, b) {                       // Gaussian elimination with partial pivoting
+    const n = b.length, M = A.map((r, i) => [...r, b[i]]);
+    for (let c = 0; c < n; c++) {
+      let p = c; for (let r = c + 1; r < n; r++) if (Math.abs(M[r][c]) > Math.abs(M[p][c])) p = r;
+      [M[c], M[p]] = [M[p], M[c]];
+      for (let r = c + 1; r < n; r++) { const f = M[r][c] / M[c][c]; for (let k = c; k <= n; k++) M[r][k] -= f * M[c][k]; }
+    }
+    const x = new Array(n).fill(0);
+    for (let r = n - 1; r >= 0; r--) { let s = M[r][n]; for (let k = r + 1; k < n; k++) s -= M[r][k] * x[k]; x[r] = s / M[r][r]; }
+    return x;
+  }
+  function lsq(Phi, y) {                       // best weights in closed form (normal equations + a whisper of ridge)
+    const m = Phi[0].length, A = Array.from({ length: m }, () => new Array(m).fill(0)), b = new Array(m).fill(0);
+    Phi.forEach((row, i) => { for (let j = 0; j < m; j++) { b[j] += row[j] * y[i]; for (let k = 0; k < m; k++) A[j][k] += row[j] * row[k]; } });
+    for (let j = 0; j < m; j++) A[j][j] += RIDGE;
+    return solve(A, b);
+  }
+  function lambdaMax(Phi) {                    // largest curvature of the loss; sets the stability limit for eta
+    const m = Phi[0].length, N = Phi.length, A = Array.from({ length: m }, () => new Array(m).fill(0));
+    for (const row of Phi) for (let j = 0; j < m; j++) for (let k = 0; k < m; k++) A[j][k] += (2 / N) * row[j] * row[k];
+    let v = new Array(m).fill(1), lam = 0;
+    for (let it = 0; it < 80; it++) {
+      const w = A.map((r) => r.reduce((s, a, k) => s + a * v[k], 0));
+      lam = Math.hypot(...w); v = w.map((x) => x / lam);
+    }
+    return lam;
+  }
+  const dot = (a, b) => { let s = 0; for (let i = 0; i < a.length; i++) s += a[i] * b[i]; return s; };
+  const norm = (a) => Math.hypot(...a);
+
+  /* ================= State ================= */
+  const st = {
+    truth: 'line', deg: 1, lr: 0.3, sps: 20,
+    pts: [], test: [],
+    w: [0, 0],
+    playing: false, fast: false, stop: null,
+    iter: 0, recs: [], cur: { tr: 0, te: 0 },
+    Phi: null, ys: null, N: 0, PhiT: null, yt: null,
+    wstar: null, tol: 0, etaMax: 1,
+    byDeg: [],
+  };
+  let needsDraw = true;
+
+  /* ================= Model bookkeeping ================= */
+  function loadData() {
+    const f = TRUTH[st.truth];
+    st.pts = X_TRAIN.map((x, i) => ({ x, y: f(x) + NOISE[i] }));
+    st.test = X_TEST.map((x) => ({ x, y: f(x) }));
+  }
+  function refreshModel() {                    // everything that depends on the data or the degree
+    const d = st.deg;
+    st.N = st.pts.length;
+    st.Phi = st.pts.map((p) => feat(p.x, d));
+    st.ys = st.pts.map((p) => p.y);
+    st.PhiT = st.test.map((p) => feat(p.x, d));
+    st.yt = st.test.map((p) => p.y);
+    st.wstar = lsq(st.Phi, st.ys);
+    st.tol = TOL_REL * (1 + norm(st.wstar));
+    st.etaMax = 2 / lambdaMax(st.Phi);
+  }
+  function refreshByDeg() {                    // best possible train / test loss at each degree
+    st.byDeg = [];
+    const ys = st.pts.map((p) => p.y), yt = st.test.map((p) => p.y);
+    for (let d = 1; d <= MAX_DEG; d++) {
+      const P = st.pts.map((p) => feat(p.x, d)), PT = st.test.map((p) => feat(p.x, d));
+      const w = lsq(P, ys);
+      const mse = (M, y) => M.reduce((s, r, i) => s + (dot(r, w) - y[i]) ** 2, 0) / M.length;
+      st.byDeg.push({ d, tr: mse(P, ys), te: mse(PT, yt) });
+    }
+  }
+  const mseOn = (M, y, w) => { let s = 0; for (let i = 0; i < M.length; i++) { const e = dot(M[i], w) - y[i]; s += e * e; } return s / M.length; };
+  const trainLoss = (w) => mseOn(st.Phi, st.ys, w);
+  const testLoss = (w) => mseOn(st.PhiT, st.yt, w);
+
+  function resetHistory() {
+    st.iter = 0; st.stop = null; st.fast = false;
+    st.cur = { tr: trainLoss(st.w), te: testLoss(st.w) };
+    st.recs = [{ i: 0, tr: st.cur.tr, te: st.cur.te }];
+    needsDraw = true;
+  }
+  function restartRun() { st.w = new Array(st.deg + 1).fill(0); st.playing = false; resetHistory(); }
+  function fullReset() { loadData(); refreshModel(); refreshByDeg(); restartRun(); }
+  function setDegree(d) { st.deg = d; refreshModel(); st.w = new Array(d + 1).fill(0); st.playing = false; resetHistory(); }
+  function onDataChanged() {                   // dragged a point: keep the weights, restart the record
+    refreshModel(); refreshByDeg(); resetHistory();
+  }
+
+  /* ================= Training ================= */
+  const stride = (it) => Math.pow(10, Math.floor(Math.log10(it)) - 1);
+  function gdStep() {                          // w <- w - eta * gradient. The whole idea, again.
+    const { Phi, ys, N, w, lr } = st, d1 = w.length, g = new Array(d1).fill(0);
+    for (let i = 0; i < N; i++) {
+      const row = Phi[i]; let e = -ys[i];
+      for (let k = 0; k < d1; k++) e += row[k] * w[k];
+      for (let k = 0; k < d1; k++) g[k] += e * row[k];
+    }
+    const c = lr * 2 / N;
+    for (let k = 0; k < d1; k++) w[k] -= c * g[k];
+  }
+  function advance(n) {
+    for (let s = 0; s < n && !st.stop; s++) {
+      gdStep(); st.iter++;
+      const it = st.iter, rec = it < 200 || it % stride(it) === 0;
+      if (rec || it % 200 === 0) {
+        const tr = trainLoss(st.w), te = testLoss(st.w);
+        st.cur = { tr, te };
+        if (rec) st.recs.push({ i: it, tr, te });
+        if (!isFinite(tr) || tr > 1e6) { st.stop = 'diverged'; st.playing = false; }
+        else if (norm(st.w.map((x, k) => x - st.wstar[k])) < st.tol) { st.stop = 'converged'; st.playing = false; }
+        else if (it >= MAX_ITERS) { st.stop = 'cap'; st.playing = false; }
+      }
+    }
+    st.cur = { tr: trainLoss(st.w), te: testLoss(st.w) };
+    if (st.stop) st.fast = false;
+    needsDraw = true;
+  }
+
+  /* ================= Canvas views (linear or log axes) ================= */
+  const range = (a, b, s) => { const r = []; for (let v = a; v <= b + 1e-9; v += s) r.push(v); return r; };
+  function makeView(id, opts) {
+    const canvas = document.getElementById(id);
+    const v = Object.assign({ canvas, ctx: canvas.getContext('2d'), xr: [0, 1], yr: [0, 1], xt: [], yt: [],
+      xlog: false, ylog: false, xlab: '', ylab: '', xfmt: String, yfmt: String,
+      w: 0, h: 0, l: 46, r: 12, t: 12, bt: 30, pw: 0, ph: 0 }, opts);
+    const tf = (val, log) => (log ? Math.log10(Math.max(val, 1e-12)) : val);
+    v.X = (x) => v.l + (tf(x, v.xlog) - tf(v.xr[0], v.xlog)) / (tf(v.xr[1], v.xlog) - tf(v.xr[0], v.xlog)) * v.pw;
+    v.Y = (y) => v.t + v.ph - (tf(y, v.ylog) - tf(v.yr[0], v.ylog)) / (tf(v.yr[1], v.ylog) - tf(v.yr[0], v.ylog)) * v.ph;
+    v.ix = (px) => v.xr[0] + (px - v.l) / v.pw * (v.xr[1] - v.xr[0]);
+    v.iy = (py) => v.yr[0] + (v.t + v.ph - py) / v.ph * (v.yr[1] - v.yr[0]);
+    v.fit = () => {
+      const dpr = Math.min(window.devicePixelRatio || 1, 2), rect = canvas.getBoundingClientRect();
+      v.w = Math.max(1, Math.round(rect.width)); v.h = Math.max(1, Math.round(rect.height));
+      canvas.width = v.w * dpr; canvas.height = v.h * dpr;
+      v.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      v.pw = Math.max(1, v.w - v.l - v.r); v.ph = Math.max(1, v.h - v.t - v.bt);
+    };
+    return v;
+  }
+  const fmtLog = (v) => (v >= 1e6 ? v / 1e6 + 'M' : v >= 1e3 ? v / 1e3 + 'k' : v >= 1 ? String(v) : String(+v.toPrecision(1)));
+  const D  = makeView('data',     { xr: [0, 6.5], yr: [-3, 14], xt: range(0, 6, 1), yt: range(0, 14, 2), xlab: 'x', ylab: 'y' });
+  const G  = makeView('deg-plot', { xr: [0.6, 7.4], yr: [0.01, 100], ylog: true, xt: range(1, 7, 1), xlab: 'polynomial degree', ylab: 'loss', yfmt: fmtLog, l: 42 });
+  const Lc = makeView('lossc',    { xr: [1, 100], yr: [0.01, 100], xlog: true, ylog: true, xlab: 'iteration', ylab: 'loss', xfmt: fmtLog, yfmt: fmtLog, l: 42 });
+  const W  = makeView('coef',     { xr: [-0.6, 1.6], yr: [-1, 1], xlab: 'weight index k  (wₖ multiplies tᵏ)', ylab: '' , l: 42 });
+
+  /* ================= Colors ================= */
+  const C = {};
+  function isDark() {
+    const t = document.documentElement.dataset.theme;
+    return t ? t === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
+  }
+  function readColors() {
+    const cs = getComputedStyle(document.documentElement);
+    for (const k of ['fg', 'muted', 'grid', 'border', 'panel', 'data', 'model', 'best', 'test', 'bg']) C[k] = cs.getPropertyValue('--' + k).trim();
+    C.dark = isDark();
+  }
+
+  /* ================= Drawing helpers ================= */
+  const FONT = '11px system-ui, -apple-system, "Segoe UI", sans-serif';
+  const fmt = (n, d = 3) => (isFinite(n) ? n.toFixed(d) : '∞');
+  function drawAxes(v) {
+    const c = v.ctx;
+    c.clearRect(0, 0, v.w, v.h);
+    c.font = FONT; c.fillStyle = C.muted; c.strokeStyle = C.grid; c.lineWidth = 1;
+    c.textAlign = 'center'; c.textBaseline = 'top';
+    for (const x of v.xt) {
+      const px = Math.round(v.X(x)) + 0.5;
+      c.beginPath(); c.moveTo(px, v.t); c.lineTo(px, v.t + v.ph); c.stroke();
+      c.fillText(v.xfmt(x), px, v.t + v.ph + 4);
+    }
+    c.textAlign = 'right'; c.textBaseline = 'middle';
+    for (const y of v.yt) {
+      const py = Math.round(v.Y(y)) + 0.5;
+      c.beginPath(); c.moveTo(v.l, py); c.lineTo(v.l + v.pw, py); c.stroke();
+      c.fillText(v.yfmt(y), v.l - 5, py);
+    }
+    c.textAlign = 'center'; c.textBaseline = 'bottom';
+    c.fillText(v.xlab, v.l + v.pw / 2, v.h - 1);
+    if (v.ylab) { c.save(); c.translate(10, v.t + v.ph / 2); c.rotate(-Math.PI / 2); c.textBaseline = 'top'; c.fillText(v.ylab, 0, -2); c.restore(); }
+  }
+  function frame(v) { v.ctx.strokeStyle = C.border; v.ctx.lineWidth = 1; v.ctx.strokeRect(v.l + 0.5, v.t + 0.5, v.pw - 1, v.ph - 1); }
+  function clipPlot(v) { v.ctx.save(); v.ctx.beginPath(); v.ctx.rect(v.l, v.t, v.pw, v.ph); v.ctx.clip(); }
+  const pow10s = (lo, hi) => { const r = []; for (let e = Math.ceil(Math.log10(lo) - 1e-9); e <= Math.floor(Math.log10(hi) + 1e-9); e++) r.push(Math.pow(10, e)); return r; };   // powers of ten inside [lo, hi]
+  const predict = (x) => dot(feat(x, st.deg), st.w);
+
+  /* ================= Data space ================= */
+  function drawData() {
+    const v = D, c = v.ctx;
+    drawAxes(v); clipPlot(v);
+    const [x0, x1] = v.xr, f = TRUTH[st.truth];
+    const curve = (fn, color, width, dash) => {
+      c.strokeStyle = color; c.lineWidth = width; c.setLineDash(dash); c.lineJoin = 'round';
+      c.beginPath(); let pen = false;
+      for (let i = 0; i <= 200; i++) {
+        const x = x0 + (x1 - x0) * i / 200, y = fn(x);
+        if (!isFinite(y)) { pen = false; continue; }
+        const px = v.X(x), py = v.Y(y);
+        pen ? c.lineTo(px, py) : c.moveTo(px, py); pen = true;
+      }
+      c.stroke(); c.setLineDash([]);
+    };
+    curve(f, C.test, 1.75, [2, 4]);                                       // the truth, dotted
+    if (st.w.every(isFinite)) {
+      c.strokeStyle = C.model; c.globalAlpha = 0.55; c.lineWidth = 2;     // residuals: the errors
+      for (const p of st.pts) { c.beginPath(); c.moveTo(v.X(p.x), v.Y(p.y)); c.lineTo(v.X(p.x), v.Y(predict(p.x))); c.stroke(); }
+      c.globalAlpha = 1;
+      curve(predict, C.model, 2.75, []);                                  // the model
+    }
+    for (const p of st.test) {                                            // test points, hollow diamonds
+      const X = v.X(p.x), Y = v.Y(p.y), r = 5;
+      c.beginPath(); c.moveTo(X, Y - r); c.lineTo(X + r, Y); c.lineTo(X, Y + r); c.lineTo(X - r, Y); c.closePath();
+      c.fillStyle = C.bg; c.fill(); c.lineWidth = 1.75; c.strokeStyle = C.test; c.stroke();
+    }
+    for (const p of st.pts) {                                             // training points, draggable
+      c.beginPath(); c.arc(v.X(p.x), v.Y(p.y), 6.5, 0, 7);
+      c.fillStyle = C.data; c.fill(); c.lineWidth = 2; c.strokeStyle = C.bg; c.stroke();
+    }
+    c.restore(); frame(v);
+    c.font = FONT; c.textAlign = 'left'; c.textBaseline = 'top';
+    c.fillStyle = C.test;  c.fillText('· · true rule', v.l + 8, v.t + 7);
+    c.fillStyle = C.model; c.fillText('—  model, degree ' + st.deg, v.l + 8, v.t + 21);
+  }
+
+  /* ================= Best fit at each degree (the central figure) ================= */
+  function drawDegrees() {
+    const v = G, c = v.ctx, FLOOR = 0.01;
+    let hi = 1;
+    for (const r of st.byDeg) hi = Math.max(hi, r.tr, r.te);
+    v.yr = [FLOOR, Math.pow(10, Math.ceil(Math.log10(hi)))];
+    v.yt = pow10s(v.yr[0], v.yr[1]);
+    drawAxes(v);
+    c.fillStyle = C.model; c.globalAlpha = 0.09;                          // highlight the current degree
+    c.fillRect(v.X(st.deg - 0.4), v.t, v.X(st.deg + 0.4) - v.X(st.deg - 0.4), v.ph);
+    c.globalAlpha = 1;
+    clipPlot(v);
+    const line = (key, color) => {
+      c.strokeStyle = color; c.lineWidth = 2; c.lineJoin = 'round'; c.beginPath();
+      st.byDeg.forEach((r, i) => { const px = v.X(r.d), py = v.Y(Math.max(r[key], FLOOR)); i ? c.lineTo(px, py) : c.moveTo(px, py); });
+      c.stroke();
+      for (const r of st.byDeg) {
+        const px = v.X(r.d), py = v.Y(Math.max(r[key], FLOOR));
+        c.beginPath(); c.arc(px, py, 4, 0, 7);
+        if (r[key] < FLOOR) { c.fillStyle = C.panel; c.fill(); c.lineWidth = 2; c.stroke(); } else { c.fillStyle = color; c.fill(); }
+      }
+    };
+    line('te', C.test);
+    line('tr', C.model);
+    let best = st.byDeg[0];
+    for (const r of st.byDeg) if (r.te < best.te) best = r;
+    c.strokeStyle = C.test; c.lineWidth = 2;
+    c.beginPath(); c.arc(v.X(best.d), v.Y(Math.max(best.te, FLOOR)), 8, 0, 7); c.stroke();
+    c.restore(); frame(v);
+    c.font = FONT; c.textAlign = 'left'; c.textBaseline = 'top';
+    c.fillStyle = C.model; c.fillText('train', v.l + 8, v.t + 6);
+    c.fillStyle = C.test;  c.fillText('test  (ring = lowest)', v.l + 8, v.t + 20);
+  }
+
+  /* ================= Loss during training (log-log) ================= */
+  function drawLoss() {
+    const v = Lc, c = v.ctx;
+    let lo = Infinity, hi = 0;
+    const eat = (x) => { if (isFinite(x) && x > 0) { lo = Math.min(lo, x); hi = Math.max(hi, x); } };
+    for (const r of st.recs) { eat(r.tr); eat(r.te); }
+    eat(st.cur.tr); eat(st.cur.te);
+    if (!isFinite(lo)) { lo = 0.01; hi = 100; }
+    let ylo = Math.pow(10, Math.floor(Math.log10(Math.max(lo, 1e-6)))), yhi = Math.pow(10, Math.ceil(Math.log10(Math.min(Math.max(hi, ylo * 10), 1e6))));
+    if (yhi / ylo < 100) ylo = yhi / 100;
+    v.yr = [ylo, yhi]; v.yt = pow10s(ylo, yhi);
+    v.xr = [1, Math.max(100, st.iter + 1)]; v.xt = pow10s(1, v.xr[1]);
+    drawAxes(v); clipPlot(v);
+    const Yc = (L) => v.Y(isFinite(L) ? Math.min(Math.max(L, ylo), yhi) : yhi);
+    const series = (key, color) => {
+      c.strokeStyle = color; c.lineWidth = 2; c.lineJoin = 'round'; c.beginPath();
+      st.recs.forEach((r, i) => { const px = v.X(r.i + 1), py = Yc(r[key]); i ? c.lineTo(px, py) : c.moveTo(px, py); });
+      c.lineTo(v.X(st.iter + 1), Yc(st.cur[key === 'tr' ? 'tr' : 'te'])); c.stroke();
+      c.fillStyle = color; c.beginPath(); c.arc(v.X(st.iter + 1), Yc(st.cur[key]), 4, 0, 7); c.fill();
+    };
+    series('te', C.test); series('tr', C.model);
+    // If test loss bottomed out earlier and has since climbed, mark where it was lowest.
+    let bi = 0;
+    for (let i = 1; i < st.recs.length; i++) if (st.recs[i].te < st.recs[bi].te) bi = i;
+    const b = st.recs[bi];
+    if (st.recs.length - 1 - bi > 2 && st.cur.te > 1.3 * b.te) {
+      c.strokeStyle = C.test; c.lineWidth = 2; c.beginPath(); c.arc(v.X(b.i + 1), Yc(b.te), 6, 0, 7); c.stroke();
+      c.font = FONT; c.textAlign = 'left'; c.textBaseline = 'bottom';
+      c.lineWidth = 3; c.strokeStyle = C.panel; c.strokeText('lowest test loss', v.X(b.i + 1) + 9, Yc(b.te) - 6);
+      c.fillStyle = C.test; c.fillText('lowest test loss', v.X(b.i + 1) + 9, Yc(b.te) - 6);
+    }
+    c.restore(); frame(v);
+    c.font = FONT; c.textAlign = 'right'; c.textBaseline = 'top';
+    c.fillStyle = C.test;  c.fillText('test',  v.l + v.pw - 6, v.t + 5);
+    c.fillStyle = C.model; c.fillText('train', v.l + v.pw - 40, v.t + 5);
+  }
+
+  const niceCeil = (x) => { const e = Math.pow(10, Math.floor(Math.log10(x))), m = x / e; return (m <= 1 ? 1 : m <= 2 ? 2 : m <= 5 ? 5 : 10) * e; };
+
+  /* ================= Weights ================= */
+  function drawWeights() {
+    const v = W, c = v.ctx, w = st.w, n = w.length;
+    let mx = 0; for (const x of w) if (isFinite(x)) mx = Math.max(mx, Math.abs(x));
+    const M = niceCeil(Math.max(mx, 1));
+    v.xr = [-0.6, n - 0.4]; v.yr = [-M, M];
+    v.xt = range(0, n - 1, 1); v.yt = [-M, 0, M];
+    v.xfmt = (k) => 'w' + k;
+    drawAxes(v); clipPlot(v);
+    const y0 = v.Y(0), bw = Math.min(28, v.pw / (n + 1) * 0.7);
+    w.forEach((x, k) => {
+      const y = v.Y(Math.max(-M, Math.min(M, isFinite(x) ? x : M)));
+      c.fillStyle = x >= 0 ? C.data : C.model;
+      c.fillRect(v.X(k) - bw / 2, Math.min(y, y0), bw, Math.max(1, Math.abs(y - y0)));
+    });
+    c.strokeStyle = C.muted; c.lineWidth = 1.25; c.beginPath(); c.moveTo(v.l, y0); c.lineTo(v.l + v.pw, y0); c.stroke();
+    c.restore(); frame(v);
+    $('wmax').textContent = 'largest |w| = ' + (mx >= 100 ? mx.toFixed(0) : mx.toFixed(2)) + '   ▪ positive  ▪ negative';
+  }
+
+  /* ================= Readout and controls ================= */
+  const $ = (id) => document.getElementById(id);
+  const STATUS = () => ({
+    converged: 'Converged: the weights match the best possible fit for this degree.',
+    diverged: `Diverged: η is above this degree's stability limit (about ${st.etaMax.toFixed(2)}).`,
+    cap: `Stopped at ${MAX_ITERS.toLocaleString()} iterations. The weights are still creeping toward the best fit.`,
+  });
+  function updateReadout() {
+    $('r-iter').textContent = st.iter.toLocaleString();
+    $('r-train').textContent = fmt(st.cur.tr, 3);
+    $('r-test').textContent = fmt(st.cur.te, 3);
+    $('status').textContent = st.stop ? STATUS()[st.stop] : (st.fast ? `Fitting… ${st.iter.toLocaleString()} iterations` : '');
+    $('status').style.color = st.stop === 'converged' || st.fast ? 'var(--muted)' : '';
+    $('play').textContent = st.playing ? 'Pause' : 'Play';
+    $('deg-val').textContent = st.deg; $('npar').textContent = st.deg + 1;
+    const lim = $('lim');
+    lim.textContent = st.lr > st.etaMax ? `Above the limit (${st.etaMax.toFixed(2)}) for degree ${st.deg}: it will diverge.` : `Stable below η ≈ ${st.etaMax.toFixed(2)} for degree ${st.deg}.`;
+    lim.className = st.lr > st.etaMax ? 'warn' : '';
+  }
+  const lrFromSlider = (s) => +(0.01 * Math.pow(120, s / 100)).toPrecision(2);
+  const spsFromSlider = (s) => Math.max(1, Math.round(Math.pow(5000, s / 100)));
+  function readSliders() {
+    st.lr = lrFromSlider(+$('lr').value); st.sps = spsFromSlider(+$('speed').value);
+    $('lr-val').textContent = st.lr.toFixed(2); $('speed-val').textContent = st.sps;
+    needsDraw = true;
+  }
+  const canRun = () => { if (st.stop) restartRun(); };
+  $('play').addEventListener('click', () => { if (!st.playing) canRun(); st.fast = false; st.playing = !st.playing; needsDraw = true; });
+  $('step').addEventListener('click', () => { canRun(); st.playing = false; st.fast = false; advance(1); });
+  $('restart').addEventListener('click', restartRun);
+  $('resetdata').addEventListener('click', fullReset);
+  $('fit').addEventListener('click', () => { canRun(); st.playing = false; st.fast = true; needsDraw = true; });
+  $('deg').addEventListener('input', (e) => setDegree(+e.target.value));
+  $('truth').addEventListener('change', (e) => { st.truth = e.target.value; fullReset(); });
+  $('lr').addEventListener('input', readSliders);
+  $('speed').addEventListener('input', readSliders);
+
+
+  /* ================= Pop-up slides ================= */
+  // One slide per chart. `key` explains the marks; `notice` is what to look for; `show` sets the app up for the demo.
+  const swatch = (type, color, text) => ({ type, color, text });
+  const SLIDES = [
+    {
+      title: 'Data space: the model is a curve',
+      idea: 'A model is a function: it turns any x into a prediction ŷ. The red curve is that function. Learning means making the vertical gaps between the curve and the blue points small.',
+      key: [
+        swatch('dot', 'var(--data)', 'Training points: the only data the model learns from. Drag them.'),
+        swatch('dia', 'var(--test)', 'Test points: never trained on. They measure how the model does on the world.'),
+        swatch('dotted', 'var(--test)', 'The true rule that made the data. Real problems never show you this.'),
+        swatch('line', 'var(--model)', 'The model right now. Its vertical gaps are the errors eᵢ; loss is the average of their squares.'),
+      ],
+      notice: [
+        'At degree 1 the model is a straight line. It cannot bend, so it cannot chase noise either.',
+        'At degree 7 the curve threads every blue point but swings away from the amber diamonds between them.',
+        'It is still one neuron. The inputs are x, x², x³, … and the neuron takes a weighted sum of them.',
+      ],
+      tryIt: 'Drag one blue point far from the line. Compare how much the degree 1 model moves with the degree 7 model.',
+      showLabel: 'Show me degree 7',
+      show: () => { $('deg').value = 7; setDegree(7); $('fit').click(); },
+      live: () => `Right now: degree ${st.deg} (${st.deg + 1} parameters), train loss ${fmt(st.cur.tr)}, test loss ${fmt(st.cur.te)}.`,
+    },
+    {
+      title: 'Best fit at each degree: flexibility has a price',
+      idea: 'Each dot is the best fit that degree could possibly reach on these eight points. More flexibility always fits the training points better. Past some degree it starts fitting the noise, and test loss rises.',
+      key: [
+        swatch('line', 'var(--model)', 'Train loss at each degree’s best fit. It can only go down as degree rises.'),
+        swatch('line', 'var(--test)', 'Test loss at the same fit. It usually falls, then rises.'),
+        swatch('ring', 'var(--test)', 'The degree with the lowest test loss.'),
+        swatch('band', 'var(--model)', 'The degree you are currently training.'),
+      ],
+      notice: [
+        'Degree 7 has 8 parameters for 8 points, so it can pass through every point. Train loss is about 0, and test loss is far worse (about 62 with the default line data).',
+        'The vertical axis is logarithmic: each gridline is ten times the one below it.',
+        'Switch the true rule to the wave and the ring moves to a higher degree. The right amount of flexibility depends on the world.',
+      ],
+      tryIt: 'Change the true rule, then watch where the ring lands.',
+      showLabel: 'Show me the wave',
+      show: () => { $('truth').value = 'wave'; st.truth = 'wave'; fullReset(); },
+      live: () => { let b = st.byDeg[0]; for (const r of st.byDeg) if (r.te < b.te) b = r; return `Right now: the lowest test loss is at degree ${b.d} (${fmt(b.te)}); you are at degree ${st.deg}.`; },
+    },
+    {
+      title: 'Loss during training: falling is not arriving',
+      idea: 'Gradient descent lowers the train loss step by step. Two things can mislead you: the loss flattens long before the weights arrive, and test loss can turn upward while train loss keeps falling.',
+      key: [
+        swatch('line', 'var(--model)', 'Train loss at each iteration.'),
+        swatch('line', 'var(--test)', 'Test loss at each iteration.'),
+        swatch('ring', 'var(--test)', 'Where test loss was lowest, shown only if it later rose.'),
+        swatch('txt', 'var(--muted)', 'Both axes are logarithmic: iterations run from 1 to millions, and loss spans orders of magnitude.'),
+      ],
+      notice: [
+        'A fast drop, then a long slow tail. The loss valley is narrow, so the last stretch of learning crawls.',
+        'Higher degrees need far more iterations: roughly 20 at degree 1, 15,000 at degree 5, and 1.9 million at degree 7 (default data, η = 0.3).',
+        'If the ring appears, stopping there would have given a better model on the test data. That is early stopping.',
+      ],
+      tryIt: 'Set degree 7, press Fit to convergence, and find the ring. Then raise η above the stability limit and watch it diverge.',
+      showLabel: 'Show me an overfit run',
+      show: () => { $('deg').value = 7; setDegree(7); $('fit').click(); },
+      live: () => `Right now: iteration ${st.iter.toLocaleString()}, train loss ${fmt(st.cur.tr)}, test loss ${fmt(st.cur.te)}.`,
+    },
+    {
+      title: 'Weights: what overfitting looks like inside',
+      idea: 'The model’s parameters are the weights w₀ … w_d. Weight wₖ multiplies tᵏ, where t is x rescaled to about −1 to 1. To bend through noisy points, high-degree fits need large weights that cancel each other.',
+      key: [
+        swatch('bar', 'var(--data)', 'A positive weight.'),
+        swatch('bar', 'var(--model)', 'A negative weight.'),
+        swatch('txt', 'var(--muted)', 'The vertical scale grows with the largest weight. Its size is printed above the chart.'),
+        swatch('txt', 'var(--muted)', 't = (x − 3.25) / 2.75 keeps every feature near −1 to 1, so weights are comparable and gradient descent runs fast.'),
+      ],
+      notice: [
+        'At degree 1 there are two small weights. At degree 7, after fitting, the largest is about 180 (default line data), and the signs alternate.',
+        'Large weights that nearly cancel are the fingerprint of overfitting.',
+        'Regularization, which penalizes large weights, is a standard remedy. This app does not include it.',
+      ],
+      tryIt: 'Compare the bars at degree 1, degree 5, and degree 7 after Fit to convergence.',
+      showLabel: 'Show me degree 7 weights',
+      show: () => { $('deg').value = 7; setDegree(7); $('fit').click(); },
+      live: () => { let mx = 0; for (const x of st.w) if (isFinite(x)) mx = Math.max(mx, Math.abs(x)); return `Right now: degree ${st.deg}, largest |w| = ${mx >= 100 ? mx.toFixed(0) : mx.toFixed(2)}.`; },
+    },
+  ];
+
+  const dlg = $('slide');
+  let slideIx = 0;
+  const sheetMQ = window.matchMedia('(max-width: 600px)');           // must match the CSS breakpoint above
+  const isSheet = () => sheetMQ.matches;
+  const kickerText = () => {
+    const col = dlg.classList.contains('collapsed');
+    return `${isSheet() ? '' : '⋮⋮  '}Chart ${slideIx + 1} of ${SLIDES.length}` +
+           (isSheet() ? (col ? '  ·  tap to expand' : '  ·  swipe down to collapse') : (col ? '' : '  ·  drag to move'));
+  };
+  function renderSlide(i) {
+    slideIx = (i + SLIDES.length) % SLIDES.length;
+    const s = SLIDES[slideIx];
+    $('sl-kicker').textContent = kickerText();
+    $('sl-title').textContent = s.title;
+    $('sl-idea').textContent = s.idea;
+    const key = $('sl-key'); key.textContent = '';
+    for (const k of s.key) {
+      const li = document.createElement('li'), sw = document.createElement('i');
+      sw.className = 'sw ' + k.type; sw.style.setProperty('--c', k.color);
+      if (k.type === 'txt') sw.textContent = 'ℹ';
+      const span = document.createElement('span'); span.textContent = k.text;
+      li.append(sw, span); key.append(li);
+    }
+    const nt = $('sl-notice'); nt.textContent = '';
+    for (const n of s.notice) { const li = document.createElement('li'); li.textContent = n; nt.append(li); }
+    const tr = $('sl-try'); tr.textContent = '';
+    const b = document.createElement('b'); b.textContent = 'Try it: ';
+    tr.append(b, document.createTextNode(s.tryIt));
+    $('sl-live').textContent = s.live();
+    $('sl-show').textContent = s.showLabel;
+    $('sl-dots').replaceChildren(...SLIDES.map((_, j) => { const d = document.createElement('i'); if (j === slideIx) d.className = 'on'; return d; }));
+  }
+  // Non-modal on purpose: show() (not showModal()) leaves the page interactive, so students can
+  // work the chart while the slide is open. The spotlight ring says which chart the slide is about.
+  let slidePos = null;
+  const clampPos = (left, top) => {
+    const w = dlg.offsetWidth, h = dlg.offsetHeight;
+    return { left: Math.min(Math.max(left, 96 - w), window.innerWidth - 96),        // may tuck mostly off-screen,
+             top: Math.min(Math.max(top, 0), Math.max(0, window.innerHeight - 48)) }; // but a handle always stays
+  };
+  function placeSlide(left, top) {
+    slidePos = clampPos(left, top);
+    dlg.style.left = slidePos.left + 'px'; dlg.style.top = slidePos.top + 'px';
+  }
+  function syncSheet() {
+    const de = document.documentElement;
+    de.classList.toggle('sheet-open', dlg.open);
+    de.classList.toggle('sheet-expanded', dlg.open && !dlg.classList.contains('collapsed'));
+  }
+  function revealChart() {                                             // phones: scroll the chart into view above the sheet
+    if (!isSheet() || !dlg.open) return;
+    const f = document.querySelectorAll('.stage figure')[slideIx];
+    if (f) f.scrollIntoView({ block: dlg.classList.contains('collapsed') ? 'center' : 'start', behavior: 'smooth' });
+  }
+  function spotlight() {
+    document.querySelectorAll('.stage figure').forEach((f, j) => f.classList.toggle('spot', dlg.open && j === slideIx));
+    syncSheet();
+  }
+  function setCollapsed(on) {
+    dlg.classList.toggle('collapsed', on);
+    $('sl-min').textContent = on ? '▴' : '▾';
+    $('sl-kicker').textContent = kickerText();
+    $('sl-min').setAttribute('aria-expanded', String(!on));
+    if (slidePos) placeSlide(slidePos.left, slidePos.top);
+    syncSheet();
+  }
+  function openSlide(i) {
+    st.playing = false;
+    renderSlide(i);
+    if (!dlg.open) {
+      dlg.show();
+      const first = !slidePos;
+      placeSlide(first ? (window.innerWidth - dlg.offsetWidth) / 2 : slidePos.left,
+                 first ? Math.max(12, (window.innerHeight - dlg.offsetHeight) / 2) : slidePos.top);
+    } else placeSlide(slidePos.left, slidePos.top);      // content height may have changed
+    spotlight();
+    revealChart();
+  }
+  document.querySelectorAll('button.info').forEach((b) => b.addEventListener('click', () => openSlide(+b.dataset.slide)));
+  const closeSlide = () => { dlg.close(); spotlight(); };            // clear the ring now, not on the (later) close event
+  $('sl-close').addEventListener('click', closeSlide);
+  dlg.addEventListener('close', spotlight);
+  const toggleCollapse = () => setCollapsed(!dlg.classList.contains('collapsed'));
+  $('sl-min').addEventListener('click', toggleCollapse);
+  $('sl-head').addEventListener('dblclick', (e) => { if (!isSheet() && !e.target.closest('button')) toggleCollapse(); });
+  $('sl-prev').addEventListener('click', () => { renderSlide(slideIx - 1); placeSlide(slidePos.left, slidePos.top); spotlight(); revealChart(); });
+  $('sl-next').addEventListener('click', () => { renderSlide(slideIx + 1); placeSlide(slidePos.left, slidePos.top); spotlight(); revealChart(); });
+  $('sl-show').addEventListener('click', () => { const s = SLIDES[slideIx]; s.show(); setCollapsed(true); revealChart(); });   // get out of the way of the demo
+  dlg.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowRight') { e.preventDefault(); renderSlide(slideIx + 1); placeSlide(slidePos.left, slidePos.top); spotlight(); revealChart(); }
+    else if (e.key === 'ArrowLeft') { e.preventDefault(); renderSlide(slideIx - 1); placeSlide(slidePos.left, slidePos.top); spotlight(); revealChart(); }
+  });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && dlg.open) closeSlide(); });   // non-modal dialogs don't do this themselves
+  window.addEventListener('resize', () => { if (dlg.open && slidePos) placeSlide(slidePos.left, slidePos.top); });
+
+  // Drag by the header. Listeners live on window so a fast drag can't outrun the element.
+  const head = $('sl-head');
+  let drag = null, swipe = null;
+  head.addEventListener('pointerdown', (e) => {
+    if (e.target.closest('button') || !slidePos) return;
+    e.preventDefault();
+    if (isSheet()) { swipe = { y: e.clientY, done: false }; return; }        // sheet: tap toggles, swipe collapses or expands
+    drag = { dx: e.clientX - slidePos.left, dy: e.clientY - slidePos.top };   // desktop: drag to move
+    head.classList.add('dragging');
+  });
+  window.addEventListener('pointermove', (e) => {
+    if (drag) placeSlide(e.clientX - drag.dx, e.clientY - drag.dy);
+    else if (swipe && !swipe.done && Math.abs(e.clientY - swipe.y) > 24) { swipe.done = true; setCollapsed(e.clientY > swipe.y); revealChart(); }
+  });
+  const endSlideDrag = () => {
+    if (swipe && !swipe.done) { toggleCollapse(); revealChart(); }          // a tap, not a swipe
+    swipe = null; drag = null; head.classList.remove('dragging');
+  };
+  window.addEventListener('pointerup', endSlideDrag);
+  window.addEventListener('pointercancel', () => { swipe = null; drag = null; head.classList.remove('dragging'); });
+  sheetMQ.addEventListener('change', () => { if (slidePos) placeSlide(slidePos.left, slidePos.top); $('sl-kicker').textContent = kickerText(); syncSheet(); });
+
+  /* ================= Dragging training points ================= */
+  const local = (e, v) => { const r = v.canvas.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
+  const clamp = (x, lo, hi) => Math.min(hi, Math.max(lo, x));
+  let dragPt = -1;
+  const nearest = (pos) => { let b = -1, bd = 16; st.pts.forEach((p, i) => { const d = Math.hypot(D.X(p.x) - pos.x, D.Y(p.y) - pos.y); if (d < bd) { bd = d; b = i; } }); return b; };
+  D.canvas.addEventListener('pointerdown', (e) => { const i = nearest(local(e, D)); if (i >= 0) { dragPt = i; D.canvas.setPointerCapture(e.pointerId); } });
+  D.canvas.addEventListener('pointermove', (e) => {
+    const pos = local(e, D);
+    if (dragPt >= 0) {
+      const p = st.pts[dragPt];
+      p.x = clamp(D.ix(pos.x), 0.1, 6.4); p.y = clamp(D.iy(pos.y), D.yr[0] + 0.1, D.yr[1] - 0.1);
+      onDataChanged();
+    } else D.canvas.style.cursor = nearest(pos) >= 0 ? 'grab' : 'crosshair';
+  });
+  const endDrag = () => { dragPt = -1; };
+  D.canvas.addEventListener('pointerup', endDrag); D.canvas.addEventListener('pointercancel', endDrag);
+
+  /* ================= Animation loop ================= */
+  let last = performance.now(), acc = 0, lastLive = 0;
+  function tick(t) {
+    const dt = Math.min(0.1, (t - last) / 1000); last = t;
+    if (dlg.open && !dlg.classList.contains('collapsed') && t - lastLive > 200) { lastLive = t; $('sl-live').textContent = SLIDES[slideIx].live(); }
+    if (st.fast) { advance(25000); }                                    // same algorithm, just many steps per frame
+    else if (st.playing) {
+      acc += dt * st.sps;
+      const n = Math.min(Math.floor(acc), 400); acc -= Math.floor(acc);
+      if (n > 0) advance(n);
+    }
+    if (needsDraw || st.fast) {
+      needsDraw = false;
+      drawData(); drawDegrees(); drawLoss(); drawWeights(); updateReadout();
+    }
+    requestAnimationFrame(tick);
+  }
+
+  /* ================= Setup ================= */
+  function layout() { readColors(); D.fit(); G.fit(); Lc.fit(); W.fit(); needsDraw = true; }
+  let layoutQueued = false;
+  const scheduleLayout = () => { if (layoutQueued) return; layoutQueued = true; requestAnimationFrame(() => { layoutQueued = false; layout(); }); };
+  const ro = new ResizeObserver(scheduleLayout);
+  document.querySelectorAll('.box').forEach((el) => ro.observe(el));
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', layout);
+
+  readSliders();
+  readColors();
+  D.fit(); G.fit(); Lc.fit(); W.fit();
+  fullReset();
+  requestAnimationFrame(tick);
+})();
+</script>
+</body>
+</html>
