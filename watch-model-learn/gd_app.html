@@ -114,9 +114,9 @@
 
     <div class="btns">
       <button id="play" class="primary" type="button">Play</button>
-      <button id="step" type="button">Step</button>
-      <button id="restart" type="button">Restart</button>
-      <button id="resetdata" type="button">Reset data</button>
+      <button id="step" type="button" title="Take one gradient step">Step</button>
+      <button id="restart" type="button" title="Return the model to where this run started and clear the path">Restart</button>
+      <button id="resetdata" type="button" title="Restore the original three points and start over from m = 0, b = 0">Reset data</button>
     </div>
     <div class="slider">
       <label for="lr">Learning rate η = <b id="lr-val">0.010</b></label>
@@ -490,8 +490,10 @@
   $('step').addEventListener('click', () => { if (st.stop) restart(); st.playing = false; step(); });
   $('restart').addEventListener('click', () => { st.playing = false; restart(); });
   $('resetdata').addEventListener('click', () => {
-    st.pts = DEFAULT_PTS.map(([x, y]) => ({ x, y }));
-    onDataChanged();
+    st.pts = DEFAULT_PTS.map(([x, y]) => ({ x, y }));   // original three points
+    st.m = 0; st.b = 0;                                 // and the original starting model
+    st.playing = false;
+    onDataChanged();                                    // refit, rebuild landscape, clear history
   });
   $('lr').addEventListener('input', readSliders);
   $('speed').addEventListener('input', readSliders);
