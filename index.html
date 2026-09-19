@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Explainers</title>
+<style>
+  :root {
+    --bg: #fff;
+    --panel: #f7f7f8;
+    --card: #fff;
+    --text: #171717;
+    --muted: #666;
+    --border: #d9d9de;
+    --accent: #4f46e5;
+    --accent-bg: #eef2ff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14141c;
+      --panel: #1b1b26;
+      --card: #1e1e2a;
+      --text: #eceef2;
+      --muted: #9a9aa8;
+      --border: #33333f;
+      --accent: #8183f4;
+      --accent-bg: #23233a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 40px 20px 60px;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, sans-serif;
+  }
+  main {
+    max-width: 880px;
+    margin: 0 auto;
+  }
+  header {
+    margin-bottom: 36px;
+  }
+  h1 {
+    font-size: 1.7rem;
+    margin: 0 0 6px;
+  }
+  header p {
+    color: var(--muted);
+    margin: 0;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 16px;
+  }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .card h2 {
+    font-size: 1.05rem;
+    margin: 0;
+  }
+  .card h2 a {
+    color: var(--text);
+    text-decoration: none;
+  }
+  .card h2 a:hover {
+    color: var(--accent);
+  }
+  .card p {
+    font-size: 0.85rem;
+    color: var(--muted);
+    margin: 0;
+    line-height: 1.4;
+  }
+  .versions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 4px;
+  }
+  .versions a {
+    font-size: 0.75rem;
+    color: var(--accent);
+    background: var(--accent-bg);
+    border-radius: 5px;
+    padding: 3px 8px;
+    text-decoration: none;
+  }
+  .versions a:hover {
+    text-decoration: underline;
+  }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>AI Explainers</h1>
+    <p>Small interactive demos for building intuition about how models learn.</p>
+  </header>
+
+  <div class="grid">
+    <div class="card">
+      <h2><a href="TuneLinearModel/index.html">Tune a Linear Model</a></h2>
+      <p>Adjust slope and intercept by hand and see the fit and loss respond.</p>
+    </div>
+
+    <div class="card">
+      <h2><a href="k-means-simulator/index.html">K-means: Watch the Model Learn</a></h2>
+      <p>Step through k-means clustering and watch centroids converge.</p>
+    </div>
+
+    <div class="card">
+      <h2><a href="rl-grid-world/index.html">RL Grid World</a></h2>
+      <p>Watch a reinforcement learning agent explore and learn a policy on a grid.</p>
+      <div class="versions">
+        <a href="rl-grid-world/v0/index.html">v0</a>
+        <a href="rl-grid-world/v1/index.html">v1</a>
+        <a href="rl-grid-world/v2/index.html">v2</a>
+        <a href="rl-grid-world/v3/index.html">v3</a>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2><a href="watch-model-learn/gd_app.html">Watching a Model Learn</a></h2>
+      <p>Gradient descent in data space and parameter space, side by side.</p>
+      <div class="versions">
+        <a href="watch-model-learn/gd_app-v0.html">v0</a>
+        <a href="watch-model-learn/gd_app.html">v1</a>
+        <a href="watch-model-learn/gd_app_v2.html">v2: train vs. test</a>
+        <a href="watch-model-learn/gd_app_v3.html">v3: polynomial features</a>
+      </div>
+    </div>
+  </div>
+</main>
+</body>
+</html>
