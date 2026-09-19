@@ -1,0 +1,714 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Watching a model learn, version 2: train vs. test</title>
+<style>
+  /* ---------- Tokens (light default, dark via OS setting or data-theme) ---------- */
+  :root {
+    --bg: #ffffff;
+    --panel: #f4f6f8;
+    --fg: #16202a;
+    --muted: #5b6773;
+    --grid: rgba(22, 32, 42, 0.09);
+    --border: #d5dbe1;
+    --data: #1c5fd4;      /* the data */
+    --model: #c8321f;     /* the model / the learner */
+    --best: #1b7a3d;      /* the known best fit */
+    --test: #a8620a;      /* the test world */
+    --focus: #1c5fd4;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12171c; --panel: #1a2128; --fg: #e6ebf0; --muted: #94a1ae;
+      --grid: rgba(230, 235, 240, 0.10); --border: #303a44;
+      --data: #6ea2ff; --model: #ff7a63; --best: #5fd08a; --test: #f0b24a; --focus: #6ea2ff;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #12171c; --panel: #1a2128; --fg: #e6ebf0; --muted: #94a1ae;
+    --grid: rgba(230, 235, 240, 0.10); --border: #303a44;
+    --data: #6ea2ff; --model: #ff7a63; --best: #5fd08a; --test: #f0b24a; --focus: #6ea2ff;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); }
+  body {
+    font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    padding: 10px;
+    padding-top: calc(10px + env(safe-area-inset-top, 0px));
+    padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+  }
+
+  /* The app fills whatever frame it is given: controls left, plots right. */
+  #app {
+    display: grid; gap: 12px;
+    grid-template-columns: minmax(196px, 232px) minmax(0, 1fr);
+    height: 100%; min-height: 430px; max-width: 1240px; margin: 0 auto;
+  }
+  .side { display: flex; flex-direction: column; gap: 12px; min-height: 0; overflow-y: auto; }
+  h1 { font-size: 1.05rem; font-weight: 650; margin: 0 0 2px; letter-spacing: -0.01em; }
+  .sub { margin: 0; color: var(--muted); font-size: 0.82rem; }
+
+  .stage {
+    display: grid; gap: 10px; min-height: 0; min-width: 0;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: minmax(0, 1fr) minmax(84px, 26%);
+  }
+  .f-loss { grid-column: 1 / -1; }
+
+  figure { margin: 0; display: flex; flex-direction: column; min-height: 0; min-width: 0;
+           background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 7px 8px 6px; }
+  figcaption { font-size: 0.8rem; font-weight: 600; padding: 0 2px 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  figcaption small { font-weight: 400; color: var(--muted); margin-left: 4px; }
+
+  /* Each plot is the largest square that fits its cell (container-query units). */
+  .cell { flex: 1; min-height: 0; min-width: 0; container-type: size; display: grid; place-items: center; }
+  .box { position: relative; width: min(100cqw, 100cqh); height: min(100cqw, 100cqh); }
+  .f-loss .box { width: 100cqw; height: 100cqh; }
+  .box canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+  #data, #param { cursor: crosshair; }
+
+  .btns { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  button {
+    font: inherit; font-size: 0.85rem; color: var(--fg); background: var(--panel);
+    border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; cursor: pointer;
+  }
+  button:hover { border-color: var(--muted); }
+  button.primary { background: var(--fg); color: var(--bg); border-color: var(--fg); font-weight: 600; }
+  button:focus-visible, input[type=range]:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  .slider { display: flex; flex-direction: column; gap: 2px; }
+  .slider label { font-size: 0.8rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .slider label b { color: var(--fg); font-weight: 650; }
+  input[type=range] { width: 100%; margin: 2px 0; accent-color: var(--model); }
+  select { font: inherit; font-size: 0.82rem; width: 100%; color: var(--fg); background: var(--panel);
+           border: 1px solid var(--border); border-radius: 6px; padding: 5px 6px; }
+  select:focus-visible, .check input:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  .check { display: flex; gap: 6px; align-items: center; font-size: 0.8rem; color: var(--muted); }
+  .check input { accent-color: var(--test); margin: 0; }
+  .slider.world label { color: var(--test); font-weight: 600; }
+  .readout .test { color: var(--test); }
+
+  .readout { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; align-content: start; margin: 0;
+             background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px;
+             font-variant-numeric: tabular-nums; font-size: 0.82rem; }
+  .readout dt { color: var(--muted); }
+  .readout dd { margin: 0; text-align: right; font-weight: 600; }
+  #status { grid-column: 1 / -1; min-height: 1.3em; margin-top: 3px; font-size: 0.78rem; font-weight: 500; color: var(--model); }
+  .hint { margin: 0; color: var(--muted); font-size: 0.78rem; }
+
+  /* Short frames (a slide): drop the prose, keep the instrument. */
+  @media (max-height: 640px) { .side header, .side .hint { display: none; } }
+
+  /* Narrow frames (a phone): stack everything, plots first, and let the page scroll. */
+  @media (max-width: 520px) {
+    #app { grid-template-columns: minmax(0, 1fr); height: auto; }
+    .stage { order: -1; grid-template-columns: minmax(0, 1fr); grid-template-rows: none; }
+    .side { overflow: visible; }
+    .cell { container-type: normal; display: block; }
+    .box, .f-loss .box { width: 100%; max-width: 440px; margin: 0 auto; height: auto; aspect-ratio: 1 / 1; }
+    .f-loss .box { aspect-ratio: 3 / 1; }
+  }
+</style>
+</head>
+<body>
+<main id="app">
+  <aside class="side">
+    <header>
+      <h1>Watching a model learn <small style="font-weight:500;color:var(--muted)">v2</small></h1>
+      <p class="sub">Left: data and the model line. Right: every possible line at once, one point per (m, b). Training rolls the red dot toward the training minimum; the test data may want somewhere else.</p>
+    </header>
+
+    <div class="btns">
+      <button id="play" class="primary" type="button">Play</button>
+      <button id="step" type="button" title="Take one gradient step">Step</button>
+      <button id="restart" type="button" title="Return the model to where this run started and clear the path">Restart</button>
+      <button id="resetdata" type="button" title="Restore the original three training points and start over from m = 0, b = 0 (the test world stays as selected)">Reset data</button>
+    </div>
+    <div class="slider">
+      <label for="lr">Learning rate η = <b id="lr-val">0.010</b></label>
+      <input id="lr" type="range" min="0" max="100" step="0.5" value="48.1">
+    </div>
+    <div class="slider">
+      <label for="speed">Speed <b id="speed-val">20</b> iterations/sec</label>
+      <input id="speed" type="range" min="0" max="100" step="0.5" value="48.2">
+    </div>
+
+    <div class="slider world">
+      <label for="world">Test data comes from</label>
+      <select id="world">
+        <option value="same">the same rule (y = 2x)</option>
+        <option value="shallow">a shallower line (y = 0.5x)</option>
+        <option value="shift">a different line (y = 3x − 2)</option>
+      </select>
+    </div>
+    <label class="check"><input id="rings" type="checkbox"> Show test-loss rings on the right</label>
+
+    <dl class="readout" aria-live="off">
+      <dt>Iteration</dt><dd id="r-iter">0</dd>
+      <dt>m</dt><dd id="r-m">0.000</dd>
+      <dt>b</dt><dd id="r-b">0.000</dd>
+      <dt>Train loss</dt><dd id="r-loss">0.000</dd>
+      <dt class="test">Test loss</dt><dd id="r-test" class="test">0.000</dd>
+      <dt>∂L/∂m</dt><dd id="r-dm">0.000</dd>
+      <dt>∂L/∂b</dt><dd id="r-db">0.000</dd>
+      <div id="status" role="status" aria-live="polite"></div>
+    </dl>
+
+    <p class="hint">Start with the test data from the same rule and press Play. Then switch the test world and watch the two curves part. Drag blue points to add noise.</p>
+  </aside>
+
+  <section class="stage" aria-label="Plots">
+    <figure class="f-data">
+      <figcaption>Data space <small>● train  ◇ test</small></figcaption>
+      <div class="cell"><div class="box"><canvas id="data" aria-label="Data points and the current model line"></canvas></div></div>
+    </figure>
+    <figure class="f-param">
+      <figcaption>Parameter space <small>shading = train loss</small></figcaption>
+      <div class="cell"><div class="box"><canvas id="param" aria-label="Loss contours over m and b with the training path"></canvas></div></div>
+    </figure>
+    <figure class="f-loss">
+      <figcaption>Train and test loss at each iteration</figcaption>
+      <div class="cell"><div class="box"><canvas id="lossc" aria-label="Loss over iterations"></canvas></div></div>
+    </figure>
+  </section>
+</main>
+
+<script>
+(() => {
+  'use strict';
+
+  /* ================= State ================= */
+  const DEFAULT_PTS = [[1, 2], [2, 4], [5, 10]];
+  const MAX_ITERS = 20000;
+  const st = {
+    pts: DEFAULT_PTS.map(([x, y]) => ({ x, y })),
+    m: 0, b: 0,
+    lr: 0.01, sps: 20,
+    playing: false,
+    iter: 0,
+    path: [], hist: [], testHist: [],
+    world: 'same', test: [], testBest: null, showRings: false,
+    stop: null,            // null | 'converged' | 'diverged' | 'cap'
+    best: null,
+  };
+  let needsDraw = true;
+
+  /* ================= Test worlds ================= */
+  // The test set is a few points from a possibly different rule. The model never trains on them.
+  const TEST_X = [1.5, 3, 4, 6];
+  const WORLDS = {
+    same:    { m: 2,   b: 0,  name: 'the same rule' },
+    shallow: { m: 0.5, b: 0,  name: 'a shallower line' },
+    shift:   { m: 3,   b: -2, name: 'a different line' },
+  };
+
+  /* ================= Math ================= */
+  function loss(m, b) {
+    let s = 0;
+    for (const p of st.pts) { const e = m * p.x + b - p.y; s += e * e; }
+    return s / st.pts.length;
+  }
+  function grad(m, b) {                       // dL/dm = (2/N) Σ x e ; dL/db = (2/N) Σ e
+    let gm = 0, gb = 0;
+    for (const p of st.pts) { const e = m * p.x + b - p.y; gm += p.x * e; gb += e; }
+    const k = 2 / st.pts.length;
+    return { dm: k * gm, db: k * gb };
+  }
+  function testLoss(m, b) {
+    let s = 0;
+    for (const p of st.test) { const e = m * p.x + b - p.y; s += e * e; }
+    return s / st.test.length;
+  }
+  function lsq(pts) {                         // closed-form least squares, only used to mark the targets
+    const n = pts.length;
+    let sx = 0, sy = 0, sxx = 0, sxy = 0;
+    for (const p of pts) { sx += p.x; sy += p.y; sxx += p.x * p.x; sxy += p.x * p.y; }
+    const den = n * sxx - sx * sx;
+    if (Math.abs(den) < 1e-9) return null;
+    const m = (n * sxy - sx * sy) / den;
+    return { m, b: (sy - m * sx) / n };
+  }
+  function fitBest() { st.best = lsq(st.pts); }
+  function setWorld(key) {
+    st.world = key;
+    const w = WORLDS[key];
+    st.test = TEST_X.map((x) => ({ x, y: w.m * x + w.b }));
+    st.testBest = lsq(st.test);
+    st.testHist = st.path.map((p) => testLoss(p.m, p.b));   // re-score the whole run in the new world
+    buildRings();
+    needsDraw = true;
+  }
+
+  /* ================= Training loop ================= */
+  function resetHistory() {
+    st.path = [{ m: st.m, b: st.b }];
+    st.hist = [loss(st.m, st.b)];
+    st.testHist = [testLoss(st.m, st.b)];
+    st.iter = 0;
+    st.stop = null;
+    needsDraw = true;
+  }
+  function step() {
+    if (st.stop) return;
+    const g = grad(st.m, st.b);
+    st.m -= st.lr * g.dm;                     // the whole idea, in two lines
+    st.b -= st.lr * g.db;
+    st.iter++;
+    const L = loss(st.m, st.b);
+    st.path.push({ m: st.m, b: st.b });
+    st.hist.push(L);
+    st.testHist.push(testLoss(st.m, st.b));
+    if (!isFinite(L) || L > 1e6) { st.stop = 'diverged'; st.playing = false; }
+    else if (Math.hypot(g.dm, g.db) < 1e-4) { st.stop = 'converged'; st.playing = false; }
+    else if (st.iter >= MAX_ITERS) { st.stop = 'cap'; st.playing = false; }
+    needsDraw = true;
+  }
+  function restart() {
+    const s = st.path[0];
+    st.m = s.m; st.b = s.b;
+    resetHistory();
+  }
+
+  /* ================= Canvas views ================= */
+  const range = (a, b, s) => { const r = []; for (let v = a; v <= b + 1e-9; v += s) r.push(v); return r; };
+  function makeView(id, xr, yr, xt, yt, xlab, ylab) {
+    const canvas = document.getElementById(id);
+    const v = { canvas, ctx: canvas.getContext('2d'), xr, yr, xt, yt, xlab, ylab,
+                w: 0, h: 0, l: 46, r: 12, t: 12, bt: 32, pw: 0, ph: 0 };
+    v.X = (x) => v.l + (x - v.xr[0]) / (v.xr[1] - v.xr[0]) * v.pw;
+    v.Y = (y) => v.t + v.ph - (y - v.yr[0]) / (v.yr[1] - v.yr[0]) * v.ph;
+    v.ix = (px) => v.xr[0] + (px - v.l) / v.pw * (v.xr[1] - v.xr[0]);
+    v.iy = (py) => v.yr[0] + (v.t + v.ph - py) / v.ph * (v.yr[1] - v.yr[0]);
+    v.fit = () => {
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const rect = canvas.getBoundingClientRect();
+      v.w = Math.max(1, Math.round(rect.width));
+      v.h = Math.max(1, Math.round(rect.height));
+      canvas.width = v.w * dpr; canvas.height = v.h * dpr;
+      v.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      v.pw = Math.max(1, v.w - v.l - v.r);
+      v.ph = Math.max(1, v.h - v.t - v.bt);
+    };
+    return v;
+  }
+  const D = makeView('data',  [-0.5, 6.5], [-1, 13], range(0, 6, 1),  range(0, 12, 2), 'x', 'y');
+  const P = makeView('param', [-1, 4],     [-3, 2],  range(-1, 4, 1), range(-3, 2, 1),  'm (slope)', 'b (intercept)');   // wide enough to show every test world's minimum
+  const Lc = makeView('lossc', [0, 1], [0, 1], [], [], 'iteration', 'loss');
+  Lc.l = 46; Lc.t = 8; Lc.bt = 24;
+
+  /* ================= Colors ================= */
+  const C = {};
+  function isDark() {
+    const t = document.documentElement.dataset.theme;
+    if (t) return t === 'dark';
+    return window.matchMedia('(prefers-color-scheme: dark)').matches;
+  }
+  function readColors() {
+    const cs = getComputedStyle(document.documentElement);
+    for (const k of ['fg', 'muted', 'grid', 'border', 'panel', 'data', 'model', 'best', 'test', 'bg'])
+      C[k] = cs.getPropertyValue('--' + k).trim();
+    C.dark = isDark();
+  }
+  function hslToRgb(h, s, l) {
+    s /= 100; l /= 100;
+    const k = (n) => (n + h / 30) % 12, a = s * Math.min(l, 1 - l);
+    const f = (n) => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+    return [Math.round(255 * f(0)), Math.round(255 * f(8)), Math.round(255 * f(4))];
+  }
+
+  /* ================= Loss landscape (banded contours) ================= */
+  const THRESH = [0.25, 0.5, 1, 2, 4, 8, 16, 32, 64, 128, 256];   // band edges, each about 2x the last
+  const heat = document.createElement('canvas');
+  function bandsOf(fn, pw, ph) {              // which loss band each pixel of the (m, b) plane falls in
+    const bands = new Uint8Array(pw * ph);
+    const [m0, m1] = P.xr, [b0, b1] = P.yr;
+    for (let y = 0; y < ph; y++) {
+      const b = b1 - (y + 0.5) / ph * (b1 - b0);
+      for (let x = 0; x < pw; x++) {
+        const m = m0 + (x + 0.5) / pw * (m1 - m0);
+        const L = fn(m, b);
+        let k = 0; while (k < THRESH.length && L > THRESH[k]) k++;
+        bands[y * pw + x] = k;
+      }
+    }
+    return bands;
+  }
+  const rings = document.createElement('canvas');
+  function buildRings() {                     // test-loss band edges only, on a transparent layer
+    if (!st.showRings) return;
+    const pw = P.pw, ph = P.ph;
+    if (pw < 2 || ph < 2) return;
+    rings.width = pw; rings.height = ph;
+    const rc = rings.getContext('2d');
+    const img = rc.createImageData(pw, ph);
+    const bands = bandsOf(testLoss, pw, ph);
+    const col = C.dark ? [240, 178, 74] : [168, 98, 10];
+    for (let y = 0; y < ph; y++) {
+      for (let x = 0; x < pw; x++) {
+        const i = y * pw + x, k = bands[i];
+        const edge = (x + 1 < pw && bands[i + 1] !== k) || (y + 1 < ph && bands[i + pw] !== k) ||
+                     (x > 0 && bands[i - 1] !== k) || (y > 0 && bands[i - pw] !== k);
+        if (edge) { const o = i * 4; img.data[o] = col[0]; img.data[o + 1] = col[1]; img.data[o + 2] = col[2]; img.data[o + 3] = 235; }
+      }
+    }
+    rc.putImageData(img, 0, 0);
+  }
+  function buildHeat() {
+    const pw = P.pw, ph = P.ph;
+    if (pw < 2 || ph < 2) return;
+    heat.width = pw; heat.height = ph;
+    const hc = heat.getContext('2d');
+    const img = hc.createImageData(pw, ph);
+    const bands = bandsOf(loss, pw, ph);
+    const nb = THRESH.length + 1;
+    const ramp = [];
+    for (let k = 0; k < nb; k++) {
+      const t = k / (nb - 1);
+      ramp.push(C.dark ? hslToRgb(212, 42, 13 + 42 * t) : hslToRgb(214, 58, 96 - 52 * t));
+    }
+    const edge = C.dark ? [255, 255, 255] : [10, 30, 60], ea = C.dark ? 0.30 : 0.28;
+    for (let y = 0; y < ph; y++) {
+      for (let x = 0; x < pw; x++) {
+        const i = y * pw + x, k = bands[i];
+        let [r, g, b] = ramp[k];
+        const onEdge = (x + 1 < pw && bands[i + 1] !== k) || (y + 1 < ph && bands[i + pw] !== k);
+        if (onEdge) { r += (edge[0] - r) * ea; g += (edge[1] - g) * ea; b += (edge[2] - b) * ea; }
+        const o = i * 4;
+        img.data[o] = r; img.data[o + 1] = g; img.data[o + 2] = b; img.data[o + 3] = 255;
+      }
+    }
+    hc.putImageData(img, 0, 0);
+  }
+
+  /* ================= Drawing helpers ================= */
+  const FONT = '11px system-ui, -apple-system, "Segoe UI", sans-serif';
+  function drawAxes(v) {
+    const c = v.ctx;
+    c.clearRect(0, 0, v.w, v.h);
+    c.font = FONT; c.fillStyle = C.muted; c.strokeStyle = C.grid; c.lineWidth = 1;
+    c.textAlign = 'center'; c.textBaseline = 'top';
+    for (const x of v.xt) {
+      const px = Math.round(v.X(x)) + 0.5;
+      c.beginPath(); c.moveTo(px, v.t); c.lineTo(px, v.t + v.ph); c.stroke();
+      c.fillText(String(x), px, v.t + v.ph + 5);
+    }
+    c.textAlign = 'right'; c.textBaseline = 'middle';
+    for (const y of v.yt) {
+      const py = Math.round(v.Y(y)) + 0.5;
+      c.beginPath(); c.moveTo(v.l, py); c.lineTo(v.l + v.pw, py); c.stroke();
+      c.fillText(String(y), v.l - 6, py);
+    }
+    c.textAlign = 'center'; c.textBaseline = 'bottom';
+    c.fillText(v.xlab, v.l + v.pw / 2, v.h - 1);
+    c.save(); c.translate(11, v.t + v.ph / 2); c.rotate(-Math.PI / 2);
+    c.textBaseline = 'top'; c.fillText(v.ylab, 0, -3); c.restore();
+  }
+  function frame(v) {
+    v.ctx.strokeStyle = C.border; v.ctx.lineWidth = 1;
+    v.ctx.strokeRect(v.l + 0.5, v.t + 0.5, v.pw - 1, v.ph - 1);
+  }
+  function clipPlot(v) { v.ctx.save(); v.ctx.beginPath(); v.ctx.rect(v.l, v.t, v.pw, v.ph); v.ctx.clip(); }
+  function arrow(c, x0, y0, x1, y1, color) {
+    c.strokeStyle = color; c.fillStyle = color; c.lineWidth = 1.75;
+    c.setLineDash([5, 3]); c.beginPath(); c.moveTo(x0, y0); c.lineTo(x1, y1); c.stroke(); c.setLineDash([]);
+    const a = Math.atan2(y1 - y0, x1 - x0), s = 7;
+    if (Math.hypot(x1 - x0, y1 - y0) < 4) return;
+    c.beginPath(); c.moveTo(x1, y1);
+    c.lineTo(x1 - s * Math.cos(a - 0.45), y1 - s * Math.sin(a - 0.45));
+    c.lineTo(x1 - s * Math.cos(a + 0.45), y1 - s * Math.sin(a + 0.45));
+    c.closePath(); c.fill();
+  }
+  const fmt = (n, d = 3) => (isFinite(n) ? n.toFixed(d) : '∞');
+  const sgn = (n) => (n < 0 ? '−' : '+');
+
+  /* ================= Data-space plot ================= */
+  function drawData() {
+    const v = D, c = v.ctx;
+    drawAxes(v);
+    clipPlot(v);
+    const [x0, x1] = v.xr;
+    if (st.best) {                                                     // best fit, dashed
+      c.strokeStyle = C.best; c.lineWidth = 1.5; c.setLineDash([6, 4]);
+      c.beginPath(); c.moveTo(v.X(x0), v.Y(st.best.m * x0 + st.best.b)); c.lineTo(v.X(x1), v.Y(st.best.m * x1 + st.best.b)); c.stroke();
+      c.setLineDash([]);
+    }
+    const w = WORLDS[st.world];                                        // the test world's rule, dotted
+    c.strokeStyle = C.test; c.lineWidth = 1.75; c.setLineDash([2, 4]);
+    c.beginPath(); c.moveTo(v.X(x0), v.Y(w.m * x0 + w.b)); c.lineTo(v.X(x1), v.Y(w.m * x1 + w.b)); c.stroke();
+    c.setLineDash([]);
+    if (isFinite(st.m) && isFinite(st.b)) {
+      c.strokeStyle = C.model; c.globalAlpha = 0.6; c.lineWidth = 2;   // residuals: the errors e_i
+      for (const p of st.pts) {
+        c.beginPath(); c.moveTo(v.X(p.x), v.Y(p.y)); c.lineTo(v.X(p.x), v.Y(st.m * p.x + st.b)); c.stroke();
+      }
+      c.globalAlpha = 1; c.lineWidth = 2.75;                            // the model
+      c.beginPath(); c.moveTo(v.X(x0), v.Y(st.m * x0 + st.b)); c.lineTo(v.X(x1), v.Y(st.m * x1 + st.b)); c.stroke();
+    }
+    for (const p of st.test) {                                         // test points: hollow diamonds, not draggable
+      const X = v.X(p.x), Y = v.Y(p.y), r = 7;
+      c.beginPath(); c.moveTo(X, Y - r); c.lineTo(X + r, Y); c.lineTo(X, Y + r); c.lineTo(X - r, Y); c.closePath();
+      c.fillStyle = C.bg; c.fill(); c.lineWidth = 2; c.strokeStyle = C.test; c.stroke();
+    }
+    for (const p of st.pts) {                                          // data points, draggable
+      c.beginPath(); c.arc(v.X(p.x), v.Y(p.y), 7, 0, 7);
+      c.fillStyle = C.data; c.fill(); c.lineWidth = 2; c.strokeStyle = C.bg; c.stroke();
+    }
+    c.restore();
+    frame(v);
+    c.font = '12px system-ui, sans-serif'; c.textAlign = 'left'; c.textBaseline = 'top'; c.fillStyle = C.fg;
+    if (isFinite(st.m) && Math.abs(st.m) < 1e5) c.fillText(`ŷ = ${fmt(st.m, 2)}·x ${sgn(st.b)} ${fmt(Math.abs(st.b), 2)}`, v.l + 8, v.t + 7);
+    c.font = FONT;
+    c.fillStyle = C.best;  c.fillText('- - train best fit', v.l + 8, v.t + 24);
+    c.fillStyle = C.test;  c.fillText('· · test world', v.l + 8, v.t + 38);
+    c.fillStyle = C.model; c.fillText('—  model', v.l + 8, v.t + 52);
+  }
+
+  /* ================= Parameter-space plot ================= */
+  function drawParam() {
+    const v = P, c = v.ctx;
+    drawAxes(v);
+    if (heat.width > 1) c.drawImage(heat, v.l, v.t, v.pw, v.ph);
+    if (st.showRings && rings.width > 1) c.drawImage(rings, v.l, v.t, v.pw, v.ph);
+    frame(v);
+    clipPlot(v);
+    c.font = '10px system-ui, sans-serif'; c.textBaseline = 'middle';
+    let bx = -999, by = -999;
+    if (st.best) {                                                     // where TRAINING is headed
+      c.strokeStyle = C.dark ? '#fff' : '#0a1e3c'; c.lineWidth = 2;
+      bx = v.X(st.best.m); by = v.Y(st.best.b);
+      const s = 7;
+      c.beginPath(); c.moveTo(bx - s, by); c.lineTo(bx + s, by); c.moveTo(bx, by - s); c.lineTo(bx, by + s); c.stroke();
+      c.fillStyle = C.dark ? '#fff' : '#0a1e3c'; c.textAlign = 'left'; c.fillText('train min', bx + 10, by + 12);
+    }
+    if (st.testBest) {                                                 // where the TEST data would want the model
+      const tx = v.X(st.testBest.m), ty = v.Y(st.testBest.b), r = 8;
+      c.strokeStyle = C.test; c.lineWidth = 2.5;
+      c.beginPath(); c.moveTo(tx, ty - r); c.lineTo(tx + r, ty); c.lineTo(tx, ty + r); c.lineTo(tx - r, ty); c.closePath(); c.stroke();
+      if (Math.hypot(tx - bx, ty - by) > 30) {
+        const flip = tx > v.l + v.pw - 62;                            // near the right edge: put the label on the left
+        c.fillStyle = C.test; c.textAlign = flip ? 'right' : 'left';
+        c.fillText('test min', tx + (flip ? -11 : 11), ty - 8);
+      }
+    }
+    const path = st.path;
+    c.strokeStyle = C.model; c.lineWidth = 2.25; c.lineJoin = 'round';
+    c.beginPath();
+    for (let i = 0; i < path.length; i++) {
+      const px = v.X(path[i].m), py = v.Y(path[i].b);
+      i ? c.lineTo(px, py) : c.moveTo(px, py);
+    }
+    c.stroke();
+    if (path.length <= 120) {
+      c.fillStyle = C.model;
+      for (const p of path) { c.beginPath(); c.arc(v.X(p.m), v.Y(p.b), 2.5, 0, 7); c.fill(); }
+    }
+    if (isFinite(st.m) && isFinite(st.b)) {
+      const s0 = path[0];
+      c.strokeStyle = C.model; c.lineWidth = 2; c.fillStyle = C.bg;
+      c.beginPath(); c.arc(v.X(s0.m), v.Y(s0.b), 5, 0, 7); c.fill(); c.stroke();   // start marker
+      if (!st.stop) {                                                    // preview of the next step
+        const g = grad(st.m, st.b);
+        arrow(c, v.X(st.m), v.Y(st.b), v.X(st.m - st.lr * g.dm), v.Y(st.b - st.lr * g.db), C.dark ? '#fff' : '#0a1e3c');
+      }
+      c.beginPath(); c.arc(v.X(st.m), v.Y(st.b), 7, 0, 7);
+      c.fillStyle = C.model; c.fill(); c.lineWidth = 2; c.strokeStyle = C.bg; c.stroke();
+    }
+    c.restore();
+  }
+
+  /* ================= Loss curve ================= */
+  function drawLoss() {
+    const v = Lc, c = v.ctx;
+    const n = Math.max(20, st.hist.length - 1);
+    const h0 = Math.max(st.hist[0], st.testHist[0]);
+    let hmax = 0;
+    for (const L of st.hist) if (isFinite(L) && L > hmax) hmax = L;
+    for (const L of st.testHist) if (isFinite(L) && L > hmax) hmax = L;
+    const ymax = Math.max(h0, Math.min(hmax, h0 * 4), 1e-9) * 1.05;
+    v.xr = [0, n]; v.yr = [0, ymax];
+    v.xt = [0, n]; v.yt = [0, ymax];
+    c.clearRect(0, 0, v.w, v.h);
+    c.font = FONT; c.fillStyle = C.muted; c.strokeStyle = C.grid; c.lineWidth = 1;
+    c.textAlign = 'center'; c.textBaseline = 'top';
+    c.fillText('0', v.X(0) + 4, v.t + v.ph + 5);
+    c.fillText(String(n), v.X(n) - 8, v.t + v.ph + 5);
+    c.fillText('iteration', v.l + v.pw / 2, v.t + v.ph + 5);
+    c.textAlign = 'right'; c.textBaseline = 'middle';
+    c.fillText('0', v.l - 6, v.Y(0));
+    c.fillText(fmt(ymax / 1.05, ymax > 100 ? 0 : 1), v.l - 6, v.Y(ymax / 1.05));
+    for (const y of [0, ymax / 1.05]) {
+      const py = Math.round(v.Y(y)) + 0.5;
+      c.beginPath(); c.moveTo(v.l, py); c.lineTo(v.l + v.pw, py); c.stroke();
+    }
+    frame(v);
+    clipPlot(v);
+    const Yc = (L) => v.Y(isFinite(L) ? Math.min(L, ymax) : ymax);
+    const curve = (arr, color, width, dash) => {
+      c.strokeStyle = color; c.lineWidth = width; c.lineJoin = 'round'; c.setLineDash(dash);
+      c.beginPath();
+      arr.forEach((L, i) => { const px = v.X(i), py = Yc(L); i ? c.lineTo(px, py) : c.moveTo(px, py); });
+      c.stroke(); c.setLineDash([]);
+    };
+    curve(st.testHist, C.test, 2, []);
+    curve(st.hist, C.model, 2, []);
+    const last = st.hist.length - 1;
+    c.fillStyle = C.model; c.beginPath(); c.arc(v.X(last), Yc(st.hist[last]), 4, 0, 7); c.fill();
+    c.fillStyle = C.test;  c.beginPath(); c.arc(v.X(last), Yc(st.testHist[last]), 4, 0, 7); c.fill();
+    // If test loss bottomed out earlier and has since climbed, mark where it was lowest.
+    let bi = 0;
+    for (let i = 1; i < st.testHist.length; i++) if (st.testHist[i] < st.testHist[bi]) bi = i;
+    if (last - bi > 2 && st.testHist[last] > 1.05 * st.testHist[bi]) {
+      c.strokeStyle = C.test; c.lineWidth = 2; c.beginPath(); c.arc(v.X(bi), Yc(st.testHist[bi]), 6, 0, 7); c.stroke();
+      c.fillStyle = C.test; c.textAlign = 'left'; c.textBaseline = 'bottom'; c.font = FONT;
+      c.lineWidth = 3; c.strokeStyle = C.panel; c.lineJoin = 'round';                  // halo so curves don't run through the label
+      c.strokeText('lowest test loss', v.X(bi) + 9, Yc(st.testHist[bi]) - 6);
+      c.fillText('lowest test loss', v.X(bi) + 9, Yc(st.testHist[bi]) - 6);
+    }
+    c.restore();
+    c.font = FONT; c.textAlign = 'right'; c.textBaseline = 'top';
+    c.fillStyle = C.test;  c.fillText('test',  v.l + v.pw - 6, v.t + 5);
+    c.fillStyle = C.model; c.fillText('train', v.l + v.pw - 40, v.t + 5);
+  }
+
+  /* ================= Readout and controls ================= */
+  const $ = (id) => document.getElementById(id);
+  const STATUS = {
+    converged: 'Converged: the slope is essentially zero, so the update no longer moves the model.',
+    diverged: 'Diverged: each step overshoots the valley and lands higher. The learning rate is too large.',
+    cap: `Stopped at ${MAX_ITERS.toLocaleString()} iterations.`,
+  };
+  function updateReadout() {
+    const g = grad(st.m, st.b);
+    $('r-iter').textContent = st.iter.toLocaleString();
+    $('r-m').textContent = fmt(st.m);
+    $('r-b').textContent = fmt(st.b);
+    $('r-loss').textContent = fmt(st.hist[st.hist.length - 1], 3);
+    $('r-test').textContent = fmt(st.testHist[st.testHist.length - 1], 3);
+    $('r-dm').textContent = fmt(g.dm, 3);
+    $('r-db').textContent = fmt(g.db, 3);
+    $('status').textContent = st.stop ? STATUS[st.stop] : '';
+    $('play').textContent = st.playing ? 'Pause' : 'Play';
+  }
+  const lrFromSlider = (s) => +(0.001 * Math.pow(120, s / 100)).toPrecision(2);   // 0.001 .. 0.12, rounded to 2 digits (about 0.093 is the edge here)
+  const spsFromSlider = (s) => Math.max(1, Math.round(Math.pow(500, s / 100)));              // 1 .. 500 iterations per second
+  function readSliders() {
+    st.lr = lrFromSlider(+$('lr').value);
+    st.sps = spsFromSlider(+$('speed').value);
+    $('lr-val').textContent = st.lr.toFixed(st.lr < 0.01 ? 4 : 3);
+    $('speed-val').textContent = Math.round(st.sps);
+    needsDraw = true;
+  }
+  function setPlaying(on) {
+    if (on && st.stop) restart();
+    st.playing = on; needsDraw = true;
+  }
+
+  $('play').addEventListener('click', () => setPlaying(!st.playing));
+  $('step').addEventListener('click', () => { if (st.stop) restart(); st.playing = false; step(); });
+  $('restart').addEventListener('click', () => { st.playing = false; restart(); });
+  $('resetdata').addEventListener('click', () => {
+    st.pts = DEFAULT_PTS.map(([x, y]) => ({ x, y }));   // original three points
+    st.m = 0; st.b = 0;                                 // and the original starting model
+    st.playing = false;
+    onDataChanged();                                    // refit, rebuild landscape, clear history
+  });
+  $('world').addEventListener('change', (e) => setWorld(e.target.value));
+  $('rings').addEventListener('change', (e) => { st.showRings = e.target.checked; buildRings(); needsDraw = true; });
+  $('lr').addEventListener('input', readSliders);
+  $('speed').addEventListener('input', readSliders);
+
+  /* ================= Pointer interaction ================= */
+  const local = (e, v) => { const r = v.canvas.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
+  const clamp = (x, lo, hi) => Math.min(hi, Math.max(lo, x));
+
+  function onDataChanged() {
+    fitBest(); buildHeat(); resetHistory();
+  }
+
+  let dragPt = -1;
+  function nearestPoint(pos) {
+    let best = -1, bd = 16;
+    st.pts.forEach((p, i) => { const d = Math.hypot(D.X(p.x) - pos.x, D.Y(p.y) - pos.y); if (d < bd) { bd = d; best = i; } });
+    return best;
+  }
+  D.canvas.addEventListener('pointerdown', (e) => {
+    const i = nearestPoint(local(e, D));
+    if (i >= 0) { dragPt = i; D.canvas.setPointerCapture(e.pointerId); }
+  });
+  D.canvas.addEventListener('pointermove', (e) => {
+    const pos = local(e, D);
+    if (dragPt >= 0) {
+      const p = st.pts[dragPt];
+      p.x = clamp(D.ix(pos.x), D.xr[0] + 0.1, D.xr[1] - 0.1);
+      p.y = clamp(D.iy(pos.y), D.yr[0] + 0.1, D.yr[1] - 0.1);
+      onDataChanged();
+    } else {
+      D.canvas.style.cursor = nearestPoint(pos) >= 0 ? 'grab' : 'crosshair';
+    }
+  });
+  const endDrag = () => { dragPt = -1; };
+  D.canvas.addEventListener('pointerup', endDrag);
+  D.canvas.addEventListener('pointercancel', endDrag);
+
+  let paramDown = false;
+  function setStartFromPointer(e) {
+    const pos = local(e, P);
+    if (pos.x < P.l || pos.x > P.l + P.pw || pos.y < P.t || pos.y > P.t + P.ph) return;
+    st.m = P.ix(pos.x); st.b = P.iy(pos.y);
+    st.playing = false;
+    resetHistory();
+  }
+  P.canvas.addEventListener('pointerdown', (e) => { paramDown = true; P.canvas.setPointerCapture(e.pointerId); setStartFromPointer(e); });
+  P.canvas.addEventListener('pointermove', (e) => { if (paramDown) setStartFromPointer(e); });
+  P.canvas.addEventListener('pointerup', () => { paramDown = false; });
+  P.canvas.addEventListener('pointercancel', () => { paramDown = false; });
+
+  /* ================= Animation loop ================= */
+  let last = performance.now(), acc = 0;
+  function tick(t) {
+    const dt = Math.min(0.1, (t - last) / 1000); last = t;
+    if (st.playing) {
+      acc += dt * st.sps;
+      let n = Math.min(Math.floor(acc), 60);
+      acc -= Math.floor(acc);
+      while (n-- > 0 && st.playing) step();
+      needsDraw = true;
+    }
+    if (needsDraw) {
+      needsDraw = false;
+      drawData(); drawParam(); drawLoss(); updateReadout();
+    }
+    requestAnimationFrame(tick);
+  }
+
+  /* ================= Setup ================= */
+  function layout() {
+    readColors();
+    D.fit(); P.fit(); Lc.fit();
+    buildHeat(); buildRings();
+    needsDraw = true;
+  }
+  let layoutQueued = false;
+  function scheduleLayout() {                 // several boxes resize together; lay out once per frame
+    if (layoutQueued) return;
+    layoutQueued = true;
+    requestAnimationFrame(() => { layoutQueued = false; layout(); });
+  }
+  const ro = new ResizeObserver(scheduleLayout);
+  document.querySelectorAll('.box').forEach((el) => ro.observe(el));
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', layout);
+
+  readSliders();
+  fitBest();
+  readColors();
+  D.fit(); P.fit(); Lc.fit();
+  setWorld('same');
+  resetHistory();
+  buildHeat(); buildRings();
+  requestAnimationFrame(tick);
+})();
+</script>
+</body>
+</html>
